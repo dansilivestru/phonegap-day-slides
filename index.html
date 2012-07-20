@@ -1,0 +1,465 @@
+<!doctype html>  
+<html lang="en">
+	
+	<head>
+		<meta charset="utf-8">
+		
+		<title>reveal.js - HTML5 Presentations</title>
+
+		<meta name="description" content="An easy to use CSS 3D slideshow tool for quickly creating good looking HTML presentations.">
+		<meta name="author" content="Hakim El Hattab">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<link href='http://fonts.googleapis.com/css?family=Lato:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
+		
+		<link rel="stylesheet" href="css/reset.css">
+		<link rel="stylesheet" href="css/main.css">
+		<link rel="stylesheet" href="css/print.css" type="text/css" media="print">
+
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+        <!-- accel stuff -->
+        <link rel="stylesheet" href="accel/rpg.css" type="text/css" media="screen" title="no title" charset="utf-8">
+        <script type="text/javascript" charset="utf-8" src="accel/cordova.playbook.js"></script>
+        <script type="text/javascript" charset="utf-8" src="accel/main.js" ></script>
+        <!-- accel stuff -->
+	</head>
+	
+	<body>
+		
+		<div class="reveal">
+
+			<!-- Used to fade in a background when a specific slide state is reached -->
+			<div class="state-background"></div>
+			
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+				<section>
+                    <section>
+                        <h1>Ripple Emulator</h1>
+                        <h3 class="inverted">Dan Silivestru <a href="http://twitter.com/confusement>">(@confusement)</a></h3>
+                        <h4>Former CTO and Co-Founder of <strong>tinyHippos</strong></h4>
+                        <h4>ripple hacker at <strong>RIM</strong></h4>
+                        <img src="images/rippleLogo.png" width="200px" style="border: none; background: none; margin-top: 0px;"/>
+                    </section>
+                    <section data-state="black">
+                        <h2>cheers!</h2>
+                        <img src="images/beer.png" width="500px"/>
+                    </section>
+                </section>
+
+				<section>
+                    <img height="500px"src="images/internet.png"/>
+					<aside class="notes">
+                       Where we came from 
+					</aside>
+				</section>
+
+                <section>
+                    <p><img height="500px" src="images/html5.png" style="border: none; background: none;"/></p>
+                </section>
+
+				<section>
+					<h2>so close...</h2>
+                    <p><img src="images/sink.jpg"/></p>
+					<aside class="notes">
+                        Better tooling, why we built ripple
+					</aside>
+				</section>
+
+				<section>
+					<h2>not really</h2>
+                    <p><img height="450px" src="images/pain.png"/></p>
+					<aside class="notes">
+                        Better tooling, why we built ripple
+					</aside>
+				</section>
+
+                <section data-state="oldSkool">
+                    <h2>old skool</h2>
+                    <img height="450px" src="images/oldskool.png"/>
+                </section>
+
+                <section>
+                    <img src="images/rippleLogo.png" height="300px"/>
+                    <img src="images/tinyhippos.png" height="300px"/>
+                </section>
+
+                <section>
+                    <img src="images/RIM.png" width="700px"/>
+                </section>
+
+                <section>
+                    <h2>and the awesome followed...</h2>
+                    <ul>
+                        <li class="fragment">open source</li>
+                        <li class="fragment">free</li>
+                        <li class="fragment">cross platform</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>introducing Ripple</h2>
+                    <p><img width="800" src="images/ripple.png"/></p>
+                    <aside class="notes">
+                        We came up with Ripple
+                    </aside>
+                </section>
+
+                <section>
+                    <h2>voodoo</h2>
+                    <div class="script-container" style="margin: 0 auto; width:900px;">
+                        <div class="script" style="width:900px">
+if (!window.tinyHippos) {
+    window.tinyHippos = {};
+    var _panel = th_panel;
+
+    (function () {
+        var injection = _panel.LAYOUT_HTML.replace(/#URL_PREFIX#/g, rippleExtensionId);
+
+        document.open();
+        document.write(injection);
+
+        window.setTimeout(function () {
+            document.close();
+        }, 100);
+    }());
+
+}
+
+delete window.th_panel;
+                        </div>
+                    </div>
+                </section>
+
+                </section>
+
+                <section>
+                    <h2>browser pwnd!</h2>
+                    <img width="500" src="images/pwnage.png"/>
+                </section>
+
+                <section>
+                    <h1>talk is cheap</h1>
+                    <h1>let's see this bad boy run</h1>
+                </section>
+
+                <section data-state="mapInit">
+                    <h2>Where am I?</h2>
+                    <div style="float:left;">
+                        <img id="map-img" width="350px" src="images/dragon_4.png"/><br>
+                        <p id="dragon-attribution" style="font-size:8px;" class="irrelevant">http://magicandmalarky.files.wordpress.com/2011/01/dragon_4.png</p>
+                    </div>
+                    <div style="float:right;">
+                        <script>
+                            function displayMap(info) {
+                                var img = document.getElementById("map-img");
+                                img.src = "http://maps.googleapis.com/maps/api/staticmap?center=" + 
+                                    info.coords.latitude + "," + 
+                                    info.coords.longitude + 
+                                    "&zoom=12&size=350x350&sensor=false&markers=color:blue%7C" + 
+                                    info.coords.latitude + "," + 
+                                    info.coords.longitude;
+
+                                document.getElementById("dragon-attribution").setAttribute("class", "irrelevant"); 
+                            }
+                        </script>
+                        <div class="script-container">
+                            <script class="script">
+function win(info) {
+    console.log(info);
+    displayMap(info);
+}
+
+function fail(error) {
+    console.log("well... that's embarrassing");
+}
+
+function updateMap() {
+    var geo = navigator.geolocation;
+    geo.getCurrentPosition(win, fail)
+};
+                            </script>
+                            <button onclick="updateMap();" id="update-map" class="button">update map</button>
+                        </div>
+                </section>
+
+                <section data-state="accelinit">
+                    <h3>Accelerometer</h3>
+                    <div id="gamecontainer" style="float:left;">
+                        <div id="stage" class="theme">
+                            <div id="header">
+                                <h2>PhoneGap</h2>
+                                <h3>Accelerometer Demo</h3>
+                                <div class="btn" onclick="game.watchAccel()">Start</div>
+                                <div class="btn" onclick="location.reload()">Reset</div>
+                                <div id="info">
+                                    <div id="hp1" class="hp"></div>
+                                    <div id="hp2" class="hp"></div>
+                                    <div id="hp3" class="hp"></div>
+                                    <div id="hp4" class="hp"></div>
+                                    <div id="hp5" class="hp"></div>
+                                    <div id="score"></div>
+                                </div>
+                            </div>
+                            <div id="filter"></div>
+                            <div id="container"></div>
+                            <div id="edge"></div>
+                            <div id="actionLayer"></div>
+                            <div id="hero" class="heroF" ></div>
+                        </div>
+                    </div>
+                    <div class="script-container" style="float:right">
+                        <script class="script">
+function accelWin(accelInfo) {
+    // do awesome stuff with things
+}
+
+function accelFail(error) {
+    console.log("well... that's embarrassing");
+}
+
+function watchAccel() {
+    var accel = navigator.accelerometer,
+        opt = { frequency: 3000 };
+
+    accel.watchAcceleration(accelWin, accelFail, opt);
+}
+                        </script>
+                    </div>
+                </section>
+
+                <section>
+                    <h3>image capture</h3>
+                    <div id="imagecontainer" style="float:left;">
+                        <img id="captureImg" width="300px" src="images/lens.jpg"/>
+                    </div>
+                    <div class="script-container" style="float:right;">
+                        <script class="script">
+function captureWin(mediaFiles) {
+    var img = document.getElementById("captureImg");
+    
+    img.src = mediaFiles[0].fullPath;
+}
+
+function captureFail(error) {
+    console.log("well... that's embarrassing");
+}
+
+function takePic() {
+    var capture = navigator.device.capture;
+    capture.captureImage(captureWin, captureFail);
+}
+                        </script>
+                        <button onclick="takePic();" id="get-pic" class="button">Take Pic</button>
+                    </div>
+                </section>
+
+                <section>
+                    <h2>Web Inspector</h2>
+                    <a href="http://paulirish.com/2011/a-re-introduction-to-the-chrome-developer-tools/" target="_blank">Paul Irish on dev tools</a>
+                </section>
+
+                <section>
+                    <h2>Platform support</h2>
+                    <img src="images/webworks.png"/>
+                    <img src="images/cordova.png" width="155px"/>
+                    <img src="images/w3c.png"/><br>
+                    <img src="images/tizen.png" width="155px" class="fragment"/>
+                </section>
+
+                <section>
+                    <h2>Cordova apis</h2>
+                    <div style="float:left; width:60%;">
+                        <h4>supported</h4>
+                        <div style="float:left;">
+                            <ul>
+                                <li>Accelerometer</li>
+                                <li>camera</li>
+                                <li>capture - image</li>
+                                <li>compass</li>
+                                <li>connection</li>
+                                <li>contacts</li>
+                            </ul>
+                        </div>
+                        <div style="float:right;">
+                            <ul>
+                                <li>device</li>
+                                <li>events</li>
+                                <li>file</li>
+                                <li>geolocation</li>
+                                <li>notification</li>
+                                <li>storage</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div style="float:right;">
+                        <h4>coming soon...</h4>
+                        <ul>
+                            <li>capture - audio</li>
+                            <li>capture - video</li>
+                            <li>media</li>
+                        </ul>
+                    </div>
+                </section>
+
+                <section>
+                    <h2>what about plugins?!?!</h2>
+                    <div class="script-container">
+                        <script class="script" style="margin: 0 auto; width:800px;">
+function pluginWin(info) {
+    alert(info.stuff);
+}
+
+function pluginFail(error) {
+    alert(error.msg);
+}
+
+function callMyAwesomePlugin() {
+    var myPlugin = navigator.myPlugin;
+    myPlugin.myCoolMethod(pluginWin, pluginFail, {});
+}
+                        </script>
+                    </div>
+                    <button onclick="callMyAwesomePlugin();" id="call-plugin" class="button">Call My Plugin</button>
+
+                </section>
+
+                <section>
+                    <h2>help from some friends</h2>
+                    <img width="500" src="images/hack.jpg"/>
+                    <h3>#hackweekend cc/ @brianleroux</h3>
+                </section>
+
+                <section>
+                    <img src="images/apache_feather.png"/><br>
+                    <img src="images/cordova.png"/>
+                </section>
+
+                <section>
+                    <blockquote style="width:800px">
+                        We have done a lot of work in Ripple to support Cordova platform, having almost full support for all of the platform's APIs. We believe that the natural home for Ripple is in the Apache Software Foundation as a sub-project of Cordova and we want to contribute Ripple to the ASF. However, this is the first time we are doing something like this and the entire company is focused on our BB10 delivery.  We have been working very closely with the former Nitobi guys and will also work closely with the Cordova community. We hope to have the support needed in this community to help us find the best way to make this happen.
+                    </blockquote>
+                </section>
+
+                <section>
+                    <img src="images/fuckyeah.jpg"/>
+                </section>
+
+                <section>
+                    <a href="http://emulate.phonegap.com" target="_blank">emulate.phonegap.com</a><br>
+                    <img src="images/ripplebot.png"/>
+                </section>
+
+                <section>
+                    <h2>resources</h2>
+                    <a href="http://blackberry.github.com" target="_blank">blackberry.github.com</a><br>
+                    <a href="http://github.com/blackberry/Ripple-Ui" target="_blank">Ripple on gitHub</a><br>
+                    <a href="https://developer.blackberry.com/html5/download/ripple" target="_blank">Blackberry Ripple Download</a><br>
+                    <a href="https://chrome.google.com/webstore/detail/geelfhphabnejjhdalkjhgipohgpdnoc" target="_blank">Chrome Store Ripple Download</a><br>
+                    <a href="http://emulate.phonegap.com" target="_blank">emulate.phonegap.com</a>
+                    <br>
+                    <br>
+                    <h3>where to find me</h3>
+                    <a href="http://twitter.com/confusement" target="_blank">@confusement</a><br>
+                    <a href="http://github.com/dansilivestru" target="_blank">gitHub/dansilivestru</a><br>
+                </section>
+
+                <section>
+                    <h4>thank you!</h4>
+                    <img src="images/batman.png" height="500px"/><br/>
+                </section>
+
+			</div>
+
+			<!-- The navigational controls UI -->
+			<aside class="controls">
+				<a class="left" href="#">&#x25C4;</a>
+				<a class="right" href="#">&#x25BA;</a>
+				<a class="up" href="#">&#x25B2;</a>
+				<a class="down" href="#">&#x25BC;</a>
+			</aside>
+
+			<!-- Displays presentation progress, max value changes via JS to reflect # of slides -->
+			<div class="progress"><span></span></div>
+			
+		</div>
+
+		<!-- Optional libraries for code syntax highlighting and classList support in IE9 -->
+		<script src="lib/js/head.min.js"></script>
+
+		<script>
+			// Load the main reveal.js script
+			head.js( 'js/reveal.js', function() {
+				// Parse the query string into a key/value object
+				var query = {};
+
+				location.search.replace( /[A-Z0-9]+?=(\w*)/gi, function(a) {
+					query[ a.split( '=' ).shift() ] = a.split( '=' ).pop();
+				} );
+
+                Reveal.addEventListener("mapInit", function () {
+                    document.getElementById("map-img").src = "images/dragon_4.png";
+                    document.getElementById("dragon-attribution").setAttribute("class", ""); 
+                });
+
+                Reveal.addEventListener("accelinit", function () {
+                    game.init();
+                });
+
+                Reveal.addEventListener("oldSkool", function () {
+                    alert("here");
+                    alert("got this far");
+                    alert("wtf! what am I doing here?!?!");
+                });
+
+				// Fires each time a new slide is activated
+				Reveal.addEventListener( 'slidechanged', function( event ) {
+					// event.previousSlide, event.currentSlide, event.indexh, event.indexv
+				} );
+
+				Reveal.initialize({
+					// Display controls in the bottom right corner
+					controls: true,
+
+					// Display a presentation progress bar
+					progress: true,
+
+					// If true; each slide will be pushed to the browser history
+					history: true,
+
+					// Loops the presentation, defaults to false
+					loop: false,
+
+					// Flags if mouse wheel navigation should be enabled
+					mouseWheel: true,
+
+					// Apply a 3D roll to links on hover
+					rollingLinks: true,
+
+					// UI style
+					theme: query.theme || 'default', // default/neon/beige
+
+					// Transition style
+					transition: query.transition || 'default' // default/cube/page/concave/linear(2d)
+				});
+			} );
+			
+			// Load third party scripts
+			head.js( 'lib/js/classList.js' );
+			head.js( 'lib/js/highlight.js', function() {
+				// Fire off syntax highlighting for potential code samples in the slides
+				hljs.initHighlightingOnLoad();
+			} );
+
+			// If we're runnning the notes server we need to include some additional JS
+			// TODO Is there a better way to determine if we're running the notes server?
+			if( window.location.host === 'localhost:1947' ) {
+				head.js( 'socket.io/socket.io.js', 'plugin/speakernotes/client.js' );
+			}
+		</script>
+		
+	</body>
+</html>

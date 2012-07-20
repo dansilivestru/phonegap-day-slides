@@ -1,0 +1,118 @@
+.gamecontainer {
+    width: 320px;
+    height: 480px;
+    float: left;
+}
+
+.theme {
+    width: 320px;
+    height: 480px;
+    float: left;
+	color: #fff;
+	background: #aaa;
+}
+
+.theme h2 {
+    font-size: 16px;
+	margin-bottom: 0;	
+}
+
+.theme h3 {
+    font-size: 16px;
+	padding-top: 0;
+	margin-top: 0;	
+}
+
+.theme #header {
+	height: 120px;
+	margin: 18px;
+}
+
+.theme #container,  #filter {
+	margin: 18px;
+	background: #fff url('bg grass.png');
+	border: #666 2px solid;
+	width: 280px;
+	height:280px;
+	-webkit-border-radius: 10px;
+}
+
+.theme #info {
+	margin-top: 24px;
+}
+
+.theme .hp {
+	background: url('hp.png');
+	float: left;
+	width: 24px;
+	height: 24px;
+}
+
+.theme #filter {
+	position: absolute;
+	background: url('bg filter.png');
+}
+
+.theme > .heroF, .heroB, .heroFR, .heroFL, .heroBR, .heroBL, .heroR, .heroL {
+	width: 50px;
+	height: 41px;
+	background:  url(heroF.png);
+	position:absolute;
+}
+.theme .heroB, .heroBR, .heroBL {
+	background:  url(heroB.png);
+}
+.theme .heroR {background:  url(heroR.png);}
+.theme .heroL {background:  url(heroL.png);}
+.theme .heroFR {background:  url(heroFR.png);}
+.theme .heroFL {background:  url(heroFL.png);}
+
+
+.theme > .heart, .trap, .item {
+	width: 48px;
+	height: 48px;
+	background: url(heart.png) no-repeat;
+	position:absolute;
+}
+
+.theme .trap {background: url(trap.png) no-repeat;}
+
+.theme .item {background: url(item1.png) no-repeat;}
+
+.theme .btn {
+    display: inline;
+    width: 50px;
+	text-decoration: none;
+	padding: 8px 12px;
+	background:#fff;
+	color: #aaa;
+	font-weight: bold;
+	margin-right: 8px;
+	-webkit-border-radius: 10px;
+}
+
+.theme .btn:hover {
+	background: #6fd9f4;	
+	color: #fff;
+}
+
+.theme #score {
+    line-height: 1em;
+    font-size: 20px;
+    float: right;
+}
+
+.theme #info {
+    line-height: 1em;
+    font-size: 20px;
+}
+
+.theme #edge {
+	-webkit-border-radius: 8px;
+	height: 280px;
+	top: 159px;
+	left: 20px;
+	background: url(cutoff.png) no-repeat;
+	background-position: -280px -280px;
+	position:absolute;
+}
