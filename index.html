@@ -181,8 +181,14 @@ function updateMap() {
     var geo = navigator.geolocation;
     geo.getCurrentPosition(win, fail)
 };
+
+function watchPosition() {
+    var geo = navigator.geolocation;
+    geo.watchPosition(win, fail)
+};
                             </script>
                             <button onclick="updateMap();" id="update-map" class="button">update map</button>
+                            <button onclick="watchPosition();" id="watch-map" class="button">watch position</button>
                         </div>
                 </section>
 
@@ -260,6 +266,9 @@ function takePic() {
                 <section>
                     <h2>Web Inspector</h2>
                     <a href="http://paulirish.com/2011/a-re-introduction-to-the-chrome-developer-tools/" target="_blank">Paul Irish on dev tools</a>
+                    <p>
+                        <iframe width="640" height="360" src="http://www.youtube.com/embed/N8SS-rUEZPg?feature=player_embedded" frameborder="0" allowfullscreen></iframe>
+                    </p>
                 </section>
 
                 <section>
@@ -359,7 +368,8 @@ function callMyAwesomePlugin() {
                     <a href="http://github.com/blackberry/Ripple-Ui" target="_blank">Ripple on gitHub</a><br>
                     <a href="https://developer.blackberry.com/html5/download/ripple" target="_blank">Blackberry Ripple Download</a><br>
                     <a href="https://chrome.google.com/webstore/detail/geelfhphabnejjhdalkjhgipohgpdnoc" target="_blank">Chrome Store Ripple Download</a><br>
-                    <a href="http://emulate.phonegap.com" target="_blank">emulate.phonegap.com</a>
+                    <a href="http://emulate.phonegap.com" target="_blank">emulate.phonegap.com</a><br>
+                    <a href="http://lab.hakim.se/reveal-js/" target="_blank">reveal.js</a>
                     <br>
                     <br>
                     <h3>where to find me</h3>
@@ -369,7 +379,7 @@ function callMyAwesomePlugin() {
 
                 <section>
                     <h4>thank you!</h4>
-                    <img src="images/batman.png" height="500px"/><br/>
+                    <h2 class="fragment">ps... quick demo of reveal.js?</h2>
                 </section>
 
 			</div>

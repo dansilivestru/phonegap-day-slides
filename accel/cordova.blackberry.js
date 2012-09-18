@@ -1,6 +1,6 @@
-// commit b9dcff46715b3d17a05f8724d0623e4af2dd8c7e
+// commit dc26996057d667e1a8ac6d524918cce0e7078e21
 
-// File generated at :: Tue Jun 12 2012 14:44:47 GMT-0400 (EDT)
+// File generated at :: Wed Sep 12 2012 18:14:38 GMT-0400 (EDT)
 
 /*
  Licensed to the Apache Software Foundation (ASF) under one
@@ -186,11 +186,19 @@ var cordova = {
     },
     /**
      * Method to fire event from native code
+     * bNoDetach is required for events which cause an exception which needs to be caught in native code     
      */
-    fireDocumentEvent: function(type, data) {
+    fireDocumentEvent: function(type, data, bNoDetach) {
         var evt = createEvent(type, data);
         if (typeof documentEventHandlers[type] != 'undefined') {
-            documentEventHandlers[type].fire(evt);
+            if( bNoDetach ) {
+              documentEventHandlers[type].fire(evt);
+            }
+            else {
+              setTimeout(function() {
+                  documentEventHandlers[type].fire(evt);
+              }, 0);
+            }
         } else {
             document.dispatchEvent(evt);
         }
@@ -198,15 +206,13 @@ var cordova = {
     fireWindowEvent: function(type, data) {
         var evt = createEvent(type,data);
         if (typeof windowEventHandlers[type] != 'undefined') {
-            windowEventHandlers[type].fire(evt);
+            setTimeout(function() {
+                windowEventHandlers[type].fire(evt);
+            }, 0);
         } else {
             window.dispatchEvent(evt);
         }
     },
-    // TODO: this is Android only; think about how to do this better
-    shuttingDown:false,
-    UsePolling:false,
-    // END TODO
 
     // TODO: iOS only
     // This queue holds the currently executing command and all pending
@@ -285,17 +291,6 @@ var cordova = {
             }
         }
     },
-    // TODO: remove in 2.0.
-    addPlugin: function(name, obj) {
-        console.log("[DEPRECATION NOTICE] window.addPlugin and window.plugins will be removed in version 2.0.");
-        if (!window.plugins[name]) {
-            window.plugins[name] = obj;
-        }
-        else {
-            console.log("Error: Plugin "+name+" already exists.");
-        }
-    },
-
     addConstructor: function(func) {
         channel.onCordovaReady.subscribeOnce(function() {
             try {
@@ -311,51 +306,6 @@ var cordova = {
 channel.onPause = cordova.addDocumentEventHandler('pause');
 channel.onResume = cordova.addDocumentEventHandler('resume');
 channel.onDeviceReady = cordova.addDocumentEventHandler('deviceready');
-
-// Adds deprecation warnings to functions of an object (but only logs a message once)
-function deprecateFunctions(obj, objLabel) {
-    var newObj = {};
-    var logHash = {};
-    for (var i in obj) {
-        if (obj.hasOwnProperty(i)) {
-            if (typeof obj[i] == 'function') {
-                newObj[i] = (function(prop){
-                    var oldFunk = obj[prop];
-                    var funkId = objLabel + '_' + prop;
-                    return function() {
-                        if (!logHash[funkId]) {
-                            console.log('[DEPRECATION NOTICE] The "' + objLabel + '" global will be removed in version 2.0, please use lowercase "cordova".');
-                            logHash[funkId] = true;
-                        }
-                        oldFunk.apply(obj, arguments);
-                    };
-                })(i);
-            } else {
-                newObj[i] = (function(prop) { return obj[prop]; })(i);
-            }
-        }
-    }
-    return newObj;
-}
-
-/**
- * Legacy variable for plugin support
- * TODO: remove in 2.0.
- */
-if (!window.PhoneGap) {
-    window.PhoneGap = deprecateFunctions(cordova, 'PhoneGap');
-}
-if (!window.Cordova) {
-    window.Cordova = deprecateFunctions(cordova, 'Cordova');
-}
-
-/**
- * Plugins object
- * TODO: remove in 2.0.
- */
-if (!window.plugins) {
-    window.plugins = {};
-}
 
 module.exports = cordova;
 
@@ -456,7 +406,8 @@ module.exports = {
 
 // file: lib/common/channel.js
 define("cordova/channel", function(require, exports, module) {
-var utils = require('cordova/utils');
+var utils = require('cordova/utils'),
+    nextGuid = 1;
 
 /**
  * Custom pub-sub "channel" that can have functions subscribed to it
@@ -508,7 +459,6 @@ var Channel = function(type, opts) {
     this.type = type;
     this.handlers = {};
     this.numHandlers = 0;
-    this.guid = 1;
     this.fired = false;
     this.enabled = true;
     this.events = {
@@ -601,19 +551,19 @@ Channel.prototype.subscribe = function(f, c, g) {
 
     g = g || func.observer_guid || f.observer_guid;
     if (!g) {
-        // first time we've seen this subscriber
-        g = this.guid++;
-    }
-    else {
-        // subscriber already handled; dont set it twice
-        return g;
+        // first time any channel has seen this subscriber
+        g = nextGuid++;
     }
     func.observer_guid = g;
     f.observer_guid = g;
-    this.handlers[g] = func;
-    this.numHandlers++;
-    if (this.events.onSubscribe) this.events.onSubscribe.call(this);
-    if (this.fired) func.call(this);
+
+    // Don't add the same handler more than once.
+    if (!this.handlers[g]) {
+        this.handlers[g] = func;
+        this.numHandlers++;
+        if (this.events.onSubscribe) this.events.onSubscribe.call(this);
+        if (this.fired) func.apply(this, this.fireArgs);
+    }
     return g;
 };
 
@@ -627,15 +577,14 @@ Channel.prototype.subscribeOnce = function(f, c) {
 
     var g = null;
     var _this = this;
-    var m = function() {
-        f.apply(c || null, arguments);
-        _this.unsubscribe(g);
-    };
     if (this.fired) {
-        if (typeof c == "object") { f = utils.close(c, f); }
-        f.apply(this, this.fireArgs);
+        f.apply(c || null, this.fireArgs);
     } else {
-        g = this.subscribe(m);
+        g = this.subscribe(function() {
+            _this.unsubscribe(g);
+            f.apply(c || null, arguments);
+        });
+        f.observer_guid = g;
     }
     return g;
 };
@@ -651,7 +600,6 @@ Channel.prototype.unsubscribe = function(g) {
     var handler = this.handlers[g];
     if (handler) {
         if (handler.observer_guid) handler.observer_guid=null;
-        this.handlers[g] = null;
         delete this.handlers[g];
         this.numHandlers--;
         if (this.events.onUnsubscribe) this.events.onUnsubscribe.call(this);
@@ -665,14 +613,17 @@ Channel.prototype.fire = function(e) {
     if (this.enabled) {
         var fail = false;
         this.fired = true;
-        for (var item in this.handlers) {
-            var handler = this.handlers[item];
-            if (typeof handler == 'function') {
-                var rv = (handler.apply(this, arguments)===false);
-                fail = fail || rv;
-            }
-        }
         this.fireArgs = arguments;
+        // Copy the values first so that it is safe to modify it from within
+        // callbacks.
+        var toCall = [];
+        for (var item in this.handlers) {
+            toCall.push(this.handlers[item]);
+        }
+        for (var i = 0; i < toCall.length; ++i) {
+            var rv = (toCall[i].apply(this, arguments)===false);
+            fail = fail || rv;
+        }
         return !fail;
     }
     return true;
@@ -709,7 +660,6 @@ channel.create('onDestroy');
 
 // Channels that must fire before "deviceready" is fired.
 channel.waitForInitialization('onCordovaReady');
-channel.waitForInitialization('onCordovaInfoReady');
 channel.waitForInitialization('onCordovaConnectionReady');
 
 module.exports = channel;
@@ -796,6 +746,9 @@ module.exports = {
         Camera:{
             path: 'cordova/plugin/CameraConstants'
         },
+        CameraPopoverOptions: {
+            path: 'cordova/plugin/CameraPopoverOptions'
+        },
         CaptureError: {
             path: 'cordova/plugin/CaptureError'
         },
@@ -843,6 +796,9 @@ module.exports = {
         },
         Coordinates: {
             path: 'cordova/plugin/Coordinates'
+        },
+        device: {
+            path: 'cordova/plugin/device'
         },
         DirectoryEntry: {
             path: 'cordova/plugin/DirectoryEntry'
@@ -924,9 +880,9 @@ module.exports = {
 
 });
 
-// file: lib/playbook/exec.js
+// file: lib/webworks/exec.js
 define("cordova/exec", function(require, exports, module) {
-var playbook = require('cordova/plugin/playbook/manager'),
+var manager = require('cordova/plugin/manager'),
     cordova = require('cordova'),
     utils = require('cordova/utils');
 
@@ -934,7 +890,7 @@ var playbook = require('cordova/plugin/playbook/manager'),
  * Execute a cordova command.  It is up to the native side whether this action
  * is synchronous or asynchronous.  The native side can return:
  *      Synchronous: PluginResult object as a JSON string
- *      Asynchrounous: Empty string ""
+ *      Asynchronous: Empty string ""
  * If async, the native side will cordova.callbackSuccess or cordova.callbackError,
  * depending upon the result of the action.
  *
@@ -947,7 +903,7 @@ var playbook = require('cordova/plugin/playbook/manager'),
 
 module.exports = function(success, fail, service, action, args) {
     try {
-        var v = playbook.exec(success, fail, service, action, args);
+        var v = manager.exec(success, fail, service, action, args);
 
         // If status is OK, then return value back to caller
         if (v.status == cordova.callbackStatus.OK) {
@@ -966,7 +922,6 @@ module.exports = function(success, fail, service, action, args) {
         } else if (v.status == cordova.callbackStatus.NO_RESULT) {
 
         } else {
-            console.log(arguments);
             // If error, then display error
             console.log("Error: Status="+v.status+" Message="+v.message);
 
@@ -982,31 +937,191 @@ module.exports = function(success, fail, service, action, args) {
             return null;
         }
     } catch (e) {
-        console.log("Error: "+e);
+        utils.alert("Error: "+e);
     }
 };
+
 });
 
-// file: lib/playbook/platform.js
+// file: lib/webworks/java/platform.js
 define("cordova/platform", function(require, exports, module) {
 module.exports = {
-    id: "playbook",
-    initialize:function() {},
+    id: "blackberry",
+    initialize:function() {
+        var cordova = require('cordova'),
+            exec = require('cordova/exec'),
+            channel = require('cordova/channel'),
+            manager = require('cordova/plugin/manager'),
+            app = require('cordova/plugin/java/app');
+
+        // BB OS 5 does not define window.console.
+        if (typeof window.console === 'undefined') {
+            window.console = {};
+        }
+
+        // Override console.log with native logging ability.
+        // BB OS 7 devices define console.log for use with web inspector
+        // debugging. If console.log is already defined, invoke it in addition
+        // to native logging.
+        var origLog = window.console.log;
+        window.console.log = function(msg) {
+            if (typeof origLog === 'function') {
+                origLog.call(window.console, msg);
+            }
+            org.apache.cordova.Logger.log(''+msg);
+        };
+
+        // Mapping of button events to BlackBerry key identifier.
+        var buttonMapping = {
+            'backbutton'         : blackberry.system.event.KEY_BACK,
+            'conveniencebutton1' : blackberry.system.event.KEY_CONVENIENCE_1,
+            'conveniencebutton2' : blackberry.system.event.KEY_CONVENIENCE_2,
+            'endcallbutton'      : blackberry.system.event.KEY_ENDCALL,
+            'menubutton'         : blackberry.system.event.KEY_MENU,
+            'startcallbutton'    : blackberry.system.event.KEY_STARTCALL,
+            'volumedownbutton'   : blackberry.system.event.KEY_VOLUMEDOWN,
+            'volumeupbutton'     : blackberry.system.event.KEY_VOLUMEUP
+        };
+
+        // Generates a function which fires the specified event.
+        var fireEvent = function(event) {
+            return function() {
+                cordova.fireDocumentEvent(event, null);
+            };
+        };
+
+        var eventHandler = function(event) {
+            return { onSubscribe : function() {
+                // If we just attached the first handler, let native know we
+                // need to override the hardware button.
+                if (this.numHandlers === 1) {
+                    blackberry.system.event.onHardwareKey(
+                            buttonMapping[event], fireEvent(event));
+                }
+            },
+            onUnsubscribe : function() {
+                // If we just detached the last handler, let native know we
+                // no longer override the hardware button.
+                if (this.numHandlers === 0) {
+                    blackberry.system.event.onHardwareKey(
+                            buttonMapping[event], null);
+                }
+            }};
+        };
+
+        // Inject listeners for buttons on the document.
+        for (var button in buttonMapping) {
+            if (buttonMapping.hasOwnProperty(button)) {
+                cordova.addDocumentEventHandler(button, eventHandler(button));
+            }
+        }
+
+        // Fires off necessary code to pause/resume app
+        var resume = function() {
+            cordova.fireDocumentEvent('resume');
+            manager.resume();
+        };
+        var pause = function() {
+            cordova.fireDocumentEvent('pause');
+            manager.pause();
+        };
+
+        /************************************************
+         * Patch up the generic pause/resume listeners. *
+         ************************************************/
+
+        // Unsubscribe handler - turns off native backlight change
+        // listener
+        var onUnsubscribe = function() {
+            if (channel.onResume.numHandlers === 0 && channel.onPause.numHandlers === 0) {
+                exec(null, null, 'App', 'ignoreBacklight', []);
+            }
+        };
+
+        // Native backlight detection win/fail callbacks
+        var backlightWin = function(isOn) {
+            if (isOn === true) {
+                resume();
+            } else {
+                pause();
+            }
+        };
+        var backlightFail = function(e) {
+            console.log("Error detecting backlight on/off.");
+        };
+
+        // Override stock resume and pause listeners so we can trigger
+        // some native methods during attach/remove
+        channel.onResume = cordova.addDocumentEventHandler('resume', {
+            onSubscribe:function() {
+                // If we just attached the first handler and there are
+                // no pause handlers, start the backlight system
+                // listener on the native side.
+                if (channel.onResume.numHandlers === 1 && channel.onPause.numHandlers === 0) {
+                    exec(backlightWin, backlightFail, "App", "detectBacklight", []);
+                }
+            },
+            onUnsubscribe:onUnsubscribe
+        });
+        channel.onPause = cordova.addDocumentEventHandler('pause', {
+            onSubscribe:function() {
+                // If we just attached the first handler and there are
+                // no resume handlers, start the backlight system
+                // listener on the native side.
+                if (channel.onResume.numHandlers === 0 && channel.onPause.numHandlers === 1) {
+                    exec(backlightWin, backlightFail, "App", "detectBacklight", []);
+                }
+            },
+            onUnsubscribe:onUnsubscribe
+        });
+
+        // Fire resume event when application brought to foreground.
+        blackberry.app.event.onForeground(resume);
+
+        // Fire pause event when application sent to background.
+        blackberry.app.event.onBackground(pause);
+
+        // Trap BlackBerry WebWorks exit. Allow plugins to clean up before exiting.
+        blackberry.app.event.onExit(app.exitApp);
+    },
     objects: {
-        device: {
-            path: "cordova/plugin/playbook/device"
+        navigator: {
+            children: {
+                app: {
+                    path: "cordova/plugin/java/app"
+                }
+            }
+        },
+        File: { // exists natively on BlackBerry OS 7, override
+            path: "cordova/plugin/File"
         }
     },
     merges: {
         navigator: {
             children: {
-                device: {
-                    path: "cordova/plugin/playbook/device"
+                contacts: {
+                    path: 'cordova/plugin/java/contacts'
+                },
+                notification: {
+                    path: 'cordova/plugin/java/notification'
                 }
             }
+        },
+        Contact: {
+            path: 'cordova/plugin/java/Contact'
+        },
+        DirectoryEntry: {
+            path: 'cordova/plugin/java/DirectoryEntry'
+        },
+        Entry: {
+            path: 'cordova/plugin/java/Entry'
+        },
+        MediaError: { // Exists natively on BB OS 6+, merge in Cordova specifics
+            path: 'cordova/plugin/java/MediaError'
         }
     }
 };
+
 });
 
 // file: lib/common/plugin/Acceleration.js
@@ -1129,7 +1244,14 @@ cameraExport.getPicture = function(successCallback, errorCallback, options) {
         popoverOptions = options.popoverOptions;
     }
 
-    exec(successCallback, errorCallback, "Camera", "takePicture", [quality, destinationType, sourceType, targetWidth, targetHeight, encodingType, mediaType, allowEdit, correctOrientation, saveToPhotoAlbum, popoverOptions]);
+    var args = [quality, destinationType, sourceType, targetWidth, targetHeight, encodingType,
+                mediaType, allowEdit, correctOrientation, saveToPhotoAlbum, popoverOptions];
+
+    exec(successCallback, errorCallback, "Camera", "takePicture", args);
+};
+
+cameraExport.cleanup = function(successCallback, errorCallback) {
+    exec(successCallback, errorCallback, "Camera", "cleanup", []);
 };
 
 module.exports = cameraExport;
@@ -1164,6 +1286,26 @@ module.exports = {
       ARROW_ANY : 15
   }
 };
+});
+
+// file: lib/common/plugin/CameraPopoverOptions.js
+define("cordova/plugin/CameraPopoverOptions", function(require, exports, module) {
+var Camera = require('cordova/plugin/CameraConstants');
+
+/**
+ * Encapsulates options for iOS Popover image picker
+ */
+var CameraPopoverOptions = function(x,y,width,height,arrowDir){
+    // information of rectangle that popover should be anchored to
+    this.x = x || 0;
+    this.y = y || 32;
+    this.width = width || 320;
+    this.height = height || 480;
+    // The direction of the popover arrow
+    this.arrowDir = arrowDir || Camera.PopoverArrowDirection.ARROW_ANY;
+};
+
+module.exports = CameraPopoverOptions;
 });
 
 // file: lib/common/plugin/CaptureAudioOptions.js
@@ -1694,7 +1836,7 @@ var utils = require('cordova/utils'),
  * {boolean} isDirectory always true (readonly)
  * {DOMString} name of the directory, excluding the path leading to it (readonly)
  * {DOMString} fullPath the absolute full path to the directory (readonly)
- * {FileSystem} filesystem on which the directory resides (readonly)
+ * TODO: implement this!!! {FileSystem} filesystem on which the directory resides (readonly)
  */
 var DirectoryEntry = function(name, fullPath) {
      DirectoryEntry.__super__.constructor.apply(this, [false, true, name, fullPath]);
@@ -2424,11 +2566,13 @@ var FileSystem = function(name, root) {
 };
 
 module.exports = FileSystem;
+
 });
 
 // file: lib/common/plugin/FileTransfer.js
 define("cordova/plugin/FileTransfer", function(require, exports, module) {
-var exec = require('cordova/exec');
+var exec = require('cordova/exec'),
+    FileTransferError = require('cordova/plugin/FileTransferError');
 
 /**
  * FileTransfer uploads a file to a remote server.
@@ -2447,16 +2591,20 @@ var FileTransfer = function() {};
 * @param trustAllHosts {Boolean} Optional trust all hosts (e.g. for self-signed certs), defaults to false
 */
 FileTransfer.prototype.upload = function(filePath, server, successCallback, errorCallback, options, trustAllHosts) {
+    // sanity parameter checking
+    if (!filePath || !server) throw new Error("FileTransfer.upload requires filePath and server URL parameters at the minimum.");
     // check for options
     var fileKey = null;
     var fileName = null;
     var mimeType = null;
     var params = null;
     var chunkedMode = true;
+    var headers = null;
     if (options) {
         fileKey = options.fileKey;
         fileName = options.fileName;
         mimeType = options.mimeType;
+        headers = options.headers;
         if (options.chunkedMode !== null || typeof options.chunkedMode != "undefined") {
             chunkedMode = options.chunkedMode;
         }
@@ -2468,7 +2616,12 @@ FileTransfer.prototype.upload = function(filePath, server, successCallback, erro
         }
     }
 
-    exec(successCallback, errorCallback, 'FileTransfer', 'upload', [filePath, server, fileKey, fileName, mimeType, params, trustAllHosts, chunkedMode]);
+    var fail = function(e) {
+        var error = new FileTransferError(e.code, e.source, e.target, e.http_status);
+        errorCallback(error);
+    };
+
+    exec(successCallback, fail, 'FileTransfer', 'upload', [filePath, server, fileKey, fileName, mimeType, params, trustAllHosts, chunkedMode, headers]);
 };
 
 /**
@@ -2479,6 +2632,8 @@ FileTransfer.prototype.upload = function(filePath, server, successCallback, erro
  * @param errorCallback {Function}    Callback to be invoked upon error
  */
 FileTransfer.prototype.download = function(source, target, successCallback, errorCallback) {
+    // sanity parameter checking
+    if (!source || !target) throw new Error("FileTransfer.download requires source URI and target URI parameters at the minimum.");
     var win = function(result) {
         var entry = null;
         if (result.isDirectory) {
@@ -2493,6 +2648,12 @@ FileTransfer.prototype.download = function(source, target, successCallback, erro
         entry.fullPath = result.fullPath;
         successCallback(entry);
     };
+
+    var fail = function(e) {
+        var error = new FileTransferError(e.code, e.source, e.target, e.http_status);
+        errorCallback(error);
+    };
+
     exec(win, errorCallback, 'FileTransfer', 'download', [source, target]);
 };
 
@@ -2506,8 +2667,11 @@ define("cordova/plugin/FileTransferError", function(require, exports, module) {
  * FileTransferError
  * @constructor
  */
-var FileTransferError = function(code) {
+var FileTransferError = function(code, source, target, status) {
     this.code = code || null;
+    this.source = source || null;
+    this.target = target || null;
+    this.http_status = status || null;
 };
 
 FileTransferError.FILE_NOT_FOUND_ERR = 1;
@@ -2515,6 +2679,7 @@ FileTransferError.INVALID_URL_ERR = 2;
 FileTransferError.CONNECTION_ERR = 3;
 
 module.exports = FileTransferError;
+
 });
 
 // file: lib/common/plugin/FileUploadOptions.js
@@ -2526,15 +2691,19 @@ define("cordova/plugin/FileUploadOptions", function(require, exports, module) {
  * @param fileName {String}  Filename to be used by the server. Defaults to image.jpg.
  * @param mimeType {String}  Mimetype of the uploaded file. Defaults to image/jpeg.
  * @param params {Object}    Object with key: value params to send to the server.
+ * @param headers {Object}   Keys are header names, values are header values. Multiple
+ *                           headers of the same name are not supported.
  */
-var FileUploadOptions = function(fileKey, fileName, mimeType, params) {
+var FileUploadOptions = function(fileKey, fileName, mimeType, params, headers) {
     this.fileKey = fileKey || null;
     this.fileName = fileName || null;
     this.mimeType = mimeType || null;
     this.params = params || null;
+    this.headers = headers || null;
 };
 
 module.exports = FileUploadOptions;
+
 });
 
 // file: lib/common/plugin/FileUploadResult.js
@@ -2722,7 +2891,7 @@ FileWriter.prototype.seek = function(offset) {
     if (offset < 0) {
         this.position = Math.max(offset + this.length, 0);
     }
-    // Offset is bigger then file size so set position
+    // Offset is bigger than file size so set position
     // to the end of the file.
     else if (offset > this.length) {
         this.position = this.length;
@@ -2929,7 +3098,6 @@ Media.prototype.stop = function() {
     var me = this;
     exec(function() {
         me._position = 0;
-        me.successCallback();
     }, this.errorCallback, "Media", "stopPlayingAudio", [this.id]);
 };
 
@@ -2975,14 +3143,14 @@ Media.prototype.getCurrentPosition = function(success, fail) {
  * Start recording audio file.
  */
 Media.prototype.startRecord = function() {
-    exec(this.successCallback, this.errorCallback, "Media", "startRecordingAudio", [this.id, this.src]);
+    exec(null, this.errorCallback, "Media", "startRecordingAudio", [this.id, this.src]);
 };
 
 /**
  * Stop recording audio file.
  */
 Media.prototype.stopRecord = function() {
-    exec(this.successCallback, this.errorCallback, "Media", "stopRecordingAudio", [this.id]);
+    exec(null, this.errorCallback, "Media", "stopRecordingAudio", [this.id]);
 };
 
 /**
@@ -3004,34 +3172,39 @@ Media.prototype.setVolume = function(volume) {
  * PRIVATE
  *
  * @param id            The media object id (string)
- * @param status        The status code (int)
- * @param msg           The status message (string)
+ * @param msgType       The 'type' of update this is
+ * @param value         Use of value is determined by the msgType
  */
-Media.onStatus = function(id, msg, value) {
+Media.onStatus = function(id, msgType, value) {
+
     var media = mediaObjects[id];
-    // If state update
-    if (msg === Media.MEDIA_STATE) {
-        if (value === Media.MEDIA_STOPPED) {
-            if (media.successCallback) {
-                media.successCallback();
-            }
+
+    if(media) {
+        switch(msgType) {
+            case Media.MEDIA_STATE :
+                media.statusCallback && media.statusCallback(value);
+                if(value == Media.MEDIA_STOPPED) {
+                    media.successCallback && media.successCallback();
+                }
+                break;
+            case Media.MEDIA_DURATION :
+                media._duration = value;
+                break;
+            case Media.MEDIA_ERROR :
+                media.errorCallback && media.errorCallback(value); 
+                break;
+            case Media.MEDIA_POSITION :
+                media._position = Number(value);
+                break;
+            default :
+                console && console.error && console.error("Unhandled Media.onStatus :: " + msgType); 
+                break;
         }
-        if (media.statusCallback) {
-            media.statusCallback(value);
-        }
     }
-    else if (msg === Media.MEDIA_DURATION) {
-        media._duration = value;
+    else {
+         console && console.error && console.error("Received Media.onStatus callback for unknown media :: " + id);
     }
-    else if (msg === Media.MEDIA_ERROR) {
-        if (media.errorCallback) {
-            // value should be a MediaError object when msg == MEDIA_ERROR
-            media.errorCallback(value);
-        }
-    }
-    else if (msg === Media.MEDIA_POSITION) {
-        media._position = value;
-    }
+
 };
 
 module.exports = Media;
@@ -3041,20 +3214,36 @@ module.exports = Media;
 define("cordova/plugin/MediaError", function(require, exports, module) {
 /**
  * This class contains information about any Media errors.
- * @constructor
- */
-var MediaError = function(code, msg) {
-    this.code = (code !== undefined ? code : null);
-    this.message = msg || "";
-};
+*/
+/*
+ According to :: http://dev.w3.org/html5/spec-author-view/video.html#mediaerror
+ We should never be creating these objects, we should just implement the interface
+ which has 1 property for an instance, 'code'
 
-MediaError.MEDIA_ERR_NONE_ACTIVE    = 0;
-MediaError.MEDIA_ERR_ABORTED        = 1;
-MediaError.MEDIA_ERR_NETWORK        = 2;
-MediaError.MEDIA_ERR_DECODE         = 3;
-MediaError.MEDIA_ERR_NONE_SUPPORTED = 4;
+ instead of doing :
+    errorCallbackFunction( new MediaError(3,'msg') );
+we should simply use a literal :
+    errorCallbackFunction( {'code':3} );
+ */
+
+if(!MediaError) {
+    var MediaError = function(code, msg) {
+        this.code = (typeof code != 'undefined') ? code : null;
+        this.message = msg || ""; // message is NON-standard! do not use!
+    };
+}
+
+MediaError.MEDIA_ERR_NONE_ACTIVE    = MediaError.MEDIA_ERR_NONE_ACTIVE    || 0;
+MediaError.MEDIA_ERR_ABORTED        = MediaError.MEDIA_ERR_ABORTED        || 1;
+MediaError.MEDIA_ERR_NETWORK        = MediaError.MEDIA_ERR_NETWORK        || 2;
+MediaError.MEDIA_ERR_DECODE         = MediaError.MEDIA_ERR_DECODE         || 3;
+MediaError.MEDIA_ERR_NONE_SUPPORTED = MediaError.MEDIA_ERR_NONE_SUPPORTED || 4;
+// TODO: MediaError.MEDIA_ERR_NONE_SUPPORTED is legacy, the W3 spec now defines it as below. 
+// as defined by http://dev.w3.org/html5/spec-author-view/video.html#error-codes
+MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED = MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || 4;
 
 module.exports = MediaError;
+
 });
 
 // file: lib/common/plugin/MediaFile.js
@@ -3090,28 +3279,6 @@ MediaFile.prototype.getFormatData = function(successCallback, errorCallback) {
     } else {
         exec(successCallback, errorCallback, "Capture", "getFormatData", [this.fullPath, this.type]);
     }
-};
-
-// TODO: can we axe this?
-/**
- * Casts a PluginResult message property  (array of objects) to an array of MediaFile objects
- * (used in Objective-C and Android)
- *
- * @param {PluginResult} pluginResult
- */
-MediaFile.cast = function(pluginResult) {
-    var mediaFiles = [];
-    for (var i=0; i<pluginResult.message.length; i++) {
-        var mediaFile = new MediaFile();
-        mediaFile.name = pluginResult.message[i].name;
-        mediaFile.fullPath = pluginResult.message[i].fullPath;
-        mediaFile.type = pluginResult.message[i].type;
-        mediaFile.lastModifiedDate = pluginResult.message[i].lastModifiedDate;
-        mediaFile.size = pluginResult.message[i].size;
-        mediaFiles.push(mediaFile);
-    }
-    pluginResult.message = mediaFiles;
-    return pluginResult;
 };
 
 module.exports = MediaFile;
@@ -3164,7 +3331,7 @@ var Position = function(coords, timestamp) {
     } else {
         this.coords = new Coordinates();
     }
-    this.timestamp = (timestamp !== undefined) ? timestamp : new Date().getTime();
+    this.timestamp = (timestamp !== undefined) ? timestamp : new Date();
 };
 
 module.exports = Position;
@@ -3329,12 +3496,12 @@ var accelerometer = {
 
         var p;
         var win = function(a) {
-            successCallback(a);
             removeListeners(p);
+            successCallback(a);
         };
         var fail = function(e) {
-            errorCallback(e);
             removeListeners(p);
+            errorCallback(e);
         };
 
         p = createCallbackPair(win, fail);
@@ -3366,8 +3533,8 @@ var accelerometer = {
         var id = utils.createUUID();
 
         var p = createCallbackPair(function(){}, function(e) {
-            errorCallback(e);
             removeListeners(p);
+            errorCallback(e);
         });
         listeners.push(p);
 
@@ -3382,7 +3549,10 @@ var accelerometer = {
 
         if (running) {
             // If we're already running then immediately invoke the success callback
-            successCallback(accel);
+            // but only if we have retrieved a value, sample code does not check for null ...
+            if(accel) {
+                successCallback(accel);
+            }
         } else {
             start();
         }
@@ -3897,7 +4067,7 @@ var contacts = {
      * This function creates a new contact, but it does not persist the contact
      * to device storage. To persist the contact to device storage, invoke
      * contact.save().
-     * @param properties an object who's properties will be examined to create a new Contact
+     * @param properties an object whose properties will be examined to create a new Contact
      * @returns new Contact object
      */
     create:function(properties) {
@@ -3913,6 +4083,93 @@ var contacts = {
 };
 
 module.exports = contacts;
+
+});
+
+// file: lib/common/plugin/device.js
+define("cordova/plugin/device", function(require, exports, module) {
+var channel = require('cordova/channel'),
+    utils = require('cordova/utils'),
+    exec = require('cordova/exec');
+
+// Tell cordova channel to wait on the CordovaInfoReady event
+channel.waitForInitialization('onCordovaInfoReady');
+
+/**
+ * This represents the mobile device, and provides properties for inspecting the model, version, UUID of the
+ * phone, etc.
+ * @constructor
+ */
+function Device() {
+    this.available = false;
+    this.platform = null;
+    this.version = null;
+    this.name = null;
+    this.uuid = null;
+    this.cordova = null;
+
+    var me = this;
+
+    channel.onCordovaReady.subscribeOnce(function() {
+        me.getInfo(function(info) {
+            me.available = true;
+            me.platform = info.platform;
+            me.version = info.version;
+            me.name = info.name;
+            me.uuid = info.uuid;
+            me.cordova = info.cordova;
+            channel.onCordovaInfoReady.fire();
+        },function(e) {
+            me.available = false;
+            utils.alert("[ERROR] Error initializing Cordova: " + e);
+        });
+    });
+}
+
+/**
+ * Get device info
+ *
+ * @param {Function} successCallback The function to call when the heading data is available
+ * @param {Function} errorCallback The function to call when there is an error getting the heading data. (OPTIONAL)
+ */
+Device.prototype.getInfo = function(successCallback, errorCallback) {
+
+    // successCallback required
+    if (typeof successCallback !== "function") {
+        console.log("Device Error: successCallback is not a function");
+        return;
+    }
+
+    // errorCallback optional
+    if (errorCallback && (typeof errorCallback !== "function")) {
+        console.log("Device Error: errorCallback is not a function");
+        return;
+    }
+
+    // Get info
+    exec(successCallback, errorCallback, "Device", "getDeviceInfo", []);
+};
+
+module.exports = new Device();
+
+});
+
+// file: lib/common/plugin/echo.js
+define("cordova/plugin/echo", function(require, exports, module) {
+var exec = require('cordova/exec');
+
+/**
+ * Sends the given message through exec() to the Echo plugink, which sends it back to the successCallback.
+ * @param successCallback  invoked with a FileSystem object
+ * @param errorCallback  invoked if error occurs retrieving file system
+ * @param message  The string to be echoed.
+ * @param forceAsync  Whether to force an async return value (for testing native->js bridge).
+ */
+module.exports = function(successCallback, errorCallback, message, forceAsync) {
+    var action = forceAsync ? 'echoAsync' : 'echo';
+    exec(successCallback, errorCallback, "Echo", action, [message]);
+};
+
 
 });
 
@@ -4002,7 +4259,7 @@ var geolocation = {
                     velocity:p.velocity,
                     altitudeAccuracy:p.altitudeAccuracy
                 },
-                p.timestamp || new Date()
+                (p.timestamp === undefined ? new Date() : ((p.timestamp instanceof Date) ? p.timestamp : new Date(p.timestamp)))
             );
             geolocation.lastPosition = pos;
             successCallback(pos);
@@ -4024,7 +4281,7 @@ var geolocation = {
         } else if (options.timeout === 0) {
             fail({
                 code:PositionError.TIMEOUT,
-                message:"timeout value in PositionOptions set to 0 and no cached Position object available, or cached Position object's age exceed's provided PositionOptions' maximumAge parameter."
+                message:"timeout value in PositionOptions set to 0 and no cached Position object available, or cached Position object's age exceeds provided PositionOptions' maximumAge parameter."
             });
         // Otherwise we have to call into native to retrieve a position.
         } else {
@@ -4086,7 +4343,7 @@ var geolocation = {
                     velocity:p.velocity,
                     altitudeAccuracy:p.altitudeAccuracy
                 },
-                p.timestamp || new Date()
+                (p.timestamp === undefined ? new Date() : ((p.timestamp instanceof Date) ? p.timestamp : new Date(p.timestamp)))
             );
             geolocation.lastPosition = pos;
             successCallback(pos);
@@ -4112,6 +4369,1290 @@ var geolocation = {
 
 module.exports = geolocation;
 
+});
+
+// file: lib/webworks/java/plugin/java/Contact.js
+define("cordova/plugin/java/Contact", function(require, exports, module) {
+var ContactError = require('cordova/plugin/ContactError'),
+    ContactUtils = require('cordova/plugin/java/ContactUtils'),
+    utils = require('cordova/utils'),
+    ContactAddress = require('cordova/plugin/ContactAddress'),
+    exec = require('cordova/exec');
+
+// ------------------
+// Utility functions
+// ------------------
+
+/**
+ * Retrieves a BlackBerry contact from the device by unique id.
+ *
+ * @param uid
+ *            Unique id of the contact on the device
+ * @return {blackberry.pim.Contact} BlackBerry contact or null if contact with
+ *         specified id is not found
+ */
+var findByUniqueId = function(uid) {
+    if (!uid) {
+        return null;
+    }
+    var bbContacts = blackberry.pim.Contact.find(new blackberry.find.FilterExpression("uid", "==", uid));
+    return bbContacts[0] || null;
+};
+
+/**
+ * Creates a BlackBerry contact object from the W3C Contact object and persists
+ * it to device storage.
+ *
+ * @param {Contact}
+ *            contact The contact to save
+ * @return a new contact object with all properties set
+ */
+var saveToDevice = function(contact) {
+
+    if (!contact) {
+        return;
+    }
+
+    var bbContact = null;
+    var update = false;
+
+    // if the underlying BlackBerry contact already exists, retrieve it for
+    // update
+    if (contact.id) {
+        // we must attempt to retrieve the BlackBerry contact from the device
+        // because this may be an update operation
+        bbContact = findByUniqueId(contact.id);
+    }
+
+    // contact not found on device, create a new one
+    if (!bbContact) {
+        bbContact = new blackberry.pim.Contact();
+    }
+    // update the existing contact
+    else {
+        update = true;
+    }
+
+    // NOTE: The user may be working with a partial Contact object, because only
+    // user-specified Contact fields are returned from a find operation (blame
+    // the W3C spec). If this is an update to an existing Contact, we don't
+    // want to clear an attribute from the contact database simply because the
+    // Contact object that the user passed in contains a null value for that
+    // attribute. So we only copy the non-null Contact attributes to the
+    // BlackBerry contact object before saving.
+    //
+    // This means that a user must explicitly set a Contact attribute to a
+    // non-null value in order to update it in the contact database.
+    //
+    // name
+    if (contact.name !== null) {
+        if (contact.name.givenName) {
+            bbContact.firstName = contact.name.givenName;
+        }
+        if (contact.name.familyName) {
+            bbContact.lastName = contact.name.familyName;
+        }
+        if (contact.name.honorificPrefix) {
+            bbContact.title = contact.name.honorificPrefix;
+        }
+    }
+
+    // display name
+    if (contact.displayName !== null) {
+        bbContact.user1 = contact.displayName;
+    }
+
+    // note
+    if (contact.note !== null) {
+        bbContact.note = contact.note;
+    }
+
+    // birthday
+    //
+    // user may pass in Date object or a string representation of a date
+    // if it is a string, we don't know the date format, so try to create a
+    // new Date with what we're given
+    //
+    // NOTE: BlackBerry's Date.parse() does not work well, so use new Date()
+    //
+    if (contact.birthday !== null) {
+        if (utils.isDate(contact.birthday)) {
+            bbContact.birthday = contact.birthday;
+        } else {
+            var bday = contact.birthday.toString();
+            bbContact.birthday = (bday.length > 0) ? new Date(bday) : "";
+        }
+    }
+
+    // BlackBerry supports three email addresses
+    if (contact.emails && utils.isArray(contact.emails)) {
+
+        // if this is an update, re-initialize email addresses
+        if (update) {
+            bbContact.email1 = "";
+            bbContact.email2 = "";
+            bbContact.email3 = "";
+        }
+
+        // copy the first three email addresses found
+        var email = null;
+        for ( var i = 0; i < contact.emails.length; i += 1) {
+            email = contact.emails[i];
+            if (!email || !email.value) {
+                continue;
+            }
+            if (bbContact.email1 === "") {
+                bbContact.email1 = email.value;
+            } else if (bbContact.email2 === "") {
+                bbContact.email2 = email.value;
+            } else if (bbContact.email3 === "") {
+                bbContact.email3 = email.value;
+            }
+        }
+    }
+
+    // BlackBerry supports a finite number of phone numbers
+    // copy into appropriate fields based on type
+    if (contact.phoneNumbers && utils.isArray(contact.phoneNumbers)) {
+
+        // if this is an update, re-initialize phone numbers
+        if (update) {
+            bbContact.homePhone = "";
+            bbContact.homePhone2 = "";
+            bbContact.workPhone = "";
+            bbContact.workPhone2 = "";
+            bbContact.mobilePhone = "";
+            bbContact.faxPhone = "";
+            bbContact.pagerPhone = "";
+            bbContact.otherPhone = "";
+        }
+
+        var type = null;
+        var number = null;
+        for ( var j = 0; j < contact.phoneNumbers.length; j += 1) {
+            if (!contact.phoneNumbers[j] || !contact.phoneNumbers[j].value) {
+                continue;
+            }
+            type = contact.phoneNumbers[j].type;
+            number = contact.phoneNumbers[j].value;
+            if (type === 'home') {
+                if (bbContact.homePhone === "") {
+                    bbContact.homePhone = number;
+                } else if (bbContact.homePhone2 === "") {
+                    bbContact.homePhone2 = number;
+                }
+            } else if (type === 'work') {
+                if (bbContact.workPhone === "") {
+                    bbContact.workPhone = number;
+                } else if (bbContact.workPhone2 === "") {
+                    bbContact.workPhone2 = number;
+                }
+            } else if (type === 'mobile' && bbContact.mobilePhone === "") {
+                bbContact.mobilePhone = number;
+            } else if (type === 'fax' && bbContact.faxPhone === "") {
+                bbContact.faxPhone = number;
+            } else if (type === 'pager' && bbContact.pagerPhone === "") {
+                bbContact.pagerPhone = number;
+            } else if (bbContact.otherPhone === "") {
+                bbContact.otherPhone = number;
+            }
+        }
+    }
+
+    // BlackBerry supports two addresses: home and work
+    // copy the first two addresses found from Contact
+    if (contact.addresses && utils.isArray(contact.addresses)) {
+
+        // if this is an update, re-initialize addresses
+        if (update) {
+            bbContact.homeAddress = null;
+            bbContact.workAddress = null;
+        }
+
+        var address = null;
+        var bbHomeAddress = null;
+        var bbWorkAddress = null;
+        for ( var k = 0; k < contact.addresses.length; k += 1) {
+            address = contact.addresses[k];
+            if (!address || address.id === undefined || address.pref === undefined || address.type === undefined || address.formatted === undefined) {
+                continue;
+            }
+
+            if (bbHomeAddress === null && (!address.type || address.type === "home")) {
+                bbHomeAddress = createBlackBerryAddress(address);
+                bbContact.homeAddress = bbHomeAddress;
+            } else if (bbWorkAddress === null && (!address.type || address.type === "work")) {
+                bbWorkAddress = createBlackBerryAddress(address);
+                bbContact.workAddress = bbWorkAddress;
+            }
+        }
+    }
+
+    // copy first url found to BlackBerry 'webpage' field
+    if (contact.urls && utils.isArray(contact.urls)) {
+
+        // if this is an update, re-initialize web page
+        if (update) {
+            bbContact.webpage = "";
+        }
+
+        var url = null;
+        for ( var m = 0; m < contact.urls.length; m += 1) {
+            url = contact.urls[m];
+            if (!url || !url.value) {
+                continue;
+            }
+            if (bbContact.webpage === "") {
+                bbContact.webpage = url.value;
+                break;
+            }
+        }
+    }
+
+    // copy fields from first organization to the
+    // BlackBerry 'company' and 'jobTitle' fields
+    if (contact.organizations && utils.isArray(contact.organizations)) {
+
+        // if this is an update, re-initialize org attributes
+        if (update) {
+            bbContact.company = "";
+        }
+
+        var org = null;
+        for ( var n = 0; n < contact.organizations.length; n += 1) {
+            org = contact.organizations[n];
+            if (!org) {
+                continue;
+            }
+            if (bbContact.company === "") {
+                bbContact.company = org.name || "";
+                bbContact.jobTitle = org.title || "";
+                break;
+            }
+        }
+    }
+
+    // categories
+    if (contact.categories && utils.isArray(contact.categories)) {
+        bbContact.categories = [];
+        var category = null;
+        for ( var o = 0; o < contact.categories.length; o += 1) {
+            category = contact.categories[o];
+            if (typeof category == "string") {
+                bbContact.categories.push(category);
+            }
+        }
+    }
+
+    // save to device
+    bbContact.save();
+
+    // invoke native side to save photo
+    // fail gracefully if photo URL is no good, but log the error
+    if (contact.photos && utils.isArray(contact.photos)) {
+        var photo = null;
+        for ( var p = 0; p < contact.photos.length; p += 1) {
+            photo = contact.photos[p];
+            if (!photo || !photo.value) {
+                continue;
+            }
+            exec(
+            // success
+            function() {
+            },
+            // fail
+            function(e) {
+                console.log('Contact.setPicture failed:' + e);
+            }, "Contacts", "setPicture", [ bbContact.uid, photo.type,
+                    photo.value ]);
+            break;
+        }
+    }
+
+    // Use the fully populated BlackBerry contact object to create a
+    // corresponding W3C contact object.
+    return ContactUtils.createContact(bbContact, [ "*" ]);
+};
+
+/**
+ * Creates a BlackBerry Address object from a W3C ContactAddress.
+ *
+ * @return {blackberry.pim.Address} a BlackBerry address object
+ */
+var createBlackBerryAddress = function(address) {
+    var bbAddress = new blackberry.pim.Address();
+
+    if (!address) {
+        return bbAddress;
+    }
+
+    bbAddress.address1 = address.streetAddress || "";
+    bbAddress.city = address.locality || "";
+    bbAddress.stateProvince = address.region || "";
+    bbAddress.zipPostal = address.postalCode || "";
+    bbAddress.country = address.country || "";
+
+    return bbAddress;
+};
+
+module.exports = {
+    /**
+     * Persists contact to device storage.
+     */
+    save : function(success, fail) {
+        try {
+            // save the contact and store it's unique id
+            var fullContact = saveToDevice(this);
+            this.id = fullContact.id;
+
+            // This contact object may only have a subset of properties
+            // if the save was an update of an existing contact. This is
+            // because the existing contact was likely retrieved using a
+            // subset of properties, so only those properties were set in the
+            // object. For this reason, invoke success with the contact object
+            // returned by saveToDevice since it is fully populated.
+            if (typeof success === 'function') {
+                success(fullContact);
+            }
+        } catch (e) {
+            console.log('Error saving contact: ' + e);
+            if (typeof fail === 'function') {
+                fail(new ContactError(ContactError.UNKNOWN_ERROR));
+            }
+        }
+    },
+
+    /**
+     * Removes contact from device storage.
+     *
+     * @param success
+     *            success callback
+     * @param fail
+     *            error callback
+     */
+    remove : function(success, fail) {
+        try {
+            // retrieve contact from device by id
+            var bbContact = null;
+            if (this.id) {
+                bbContact = findByUniqueId(this.id);
+            }
+
+            // if contact was found, remove it
+            if (bbContact) {
+                console.log('removing contact: ' + bbContact.uid);
+                bbContact.remove();
+                if (typeof success === 'function') {
+                    success(this);
+                }
+            }
+            // attempting to remove a contact that hasn't been saved
+            else if (typeof fail === 'function') {
+                fail(new ContactError(ContactError.UNKNOWN_ERROR));
+            }
+        } catch (e) {
+            console.log('Error removing contact ' + this.id + ": " + e);
+            if (typeof fail === 'function') {
+                fail(new ContactError(ContactError.UNKNOWN_ERROR));
+            }
+        }
+    }
+};
+
+});
+
+// file: lib/webworks/java/plugin/java/ContactUtils.js
+define("cordova/plugin/java/ContactUtils", function(require, exports, module) {
+var ContactAddress = require('cordova/plugin/ContactAddress'),
+    ContactName = require('cordova/plugin/ContactName'),
+    ContactField = require('cordova/plugin/ContactField'),
+    ContactOrganization = require('cordova/plugin/ContactOrganization'),
+    utils = require('cordova/utils'),
+    Contact = require('cordova/plugin/Contact');
+
+/**
+ * Mappings for each Contact field that may be used in a find operation. Maps
+ * W3C Contact fields to one or more fields in a BlackBerry contact object.
+ *
+ * Example: user searches with a filter on the Contact 'name' field:
+ *
+ * <code>Contacts.find(['name'], onSuccess, onFail, {filter:'Bob'});</code>
+ *
+ * The 'name' field does not exist in a BlackBerry contact. Instead, a filter
+ * expression will be built to search the BlackBerry contacts using the
+ * BlackBerry 'title', 'firstName' and 'lastName' fields.
+ */
+var fieldMappings = {
+    "id" : "uid",
+    "displayName" : "user1",
+    "name" : [ "title", "firstName", "lastName" ],
+    "name.formatted" : [ "title", "firstName", "lastName" ],
+    "name.givenName" : "firstName",
+    "name.familyName" : "lastName",
+    "name.honorificPrefix" : "title",
+    "phoneNumbers" : [ "faxPhone", "homePhone", "homePhone2", "mobilePhone",
+            "pagerPhone", "otherPhone", "workPhone", "workPhone2" ],
+    "phoneNumbers.value" : [ "faxPhone", "homePhone", "homePhone2",
+            "mobilePhone", "pagerPhone", "otherPhone", "workPhone",
+            "workPhone2" ],
+    "emails" : [ "email1", "email2", "email3" ],
+    "addresses" : [ "homeAddress.address1", "homeAddress.address2",
+            "homeAddress.city", "homeAddress.stateProvince",
+            "homeAddress.zipPostal", "homeAddress.country",
+            "workAddress.address1", "workAddress.address2", "workAddress.city",
+            "workAddress.stateProvince", "workAddress.zipPostal",
+            "workAddress.country" ],
+    "addresses.formatted" : [ "homeAddress.address1", "homeAddress.address2",
+            "homeAddress.city", "homeAddress.stateProvince",
+            "homeAddress.zipPostal", "homeAddress.country",
+            "workAddress.address1", "workAddress.address2", "workAddress.city",
+            "workAddress.stateProvince", "workAddress.zipPostal",
+            "workAddress.country" ],
+    "addresses.streetAddress" : [ "homeAddress.address1",
+            "homeAddress.address2", "workAddress.address1",
+            "workAddress.address2" ],
+    "addresses.locality" : [ "homeAddress.city", "workAddress.city" ],
+    "addresses.region" : [ "homeAddress.stateProvince",
+            "workAddress.stateProvince" ],
+    "addresses.country" : [ "homeAddress.country", "workAddress.country" ],
+    "organizations" : [ "company", "jobTitle" ],
+    "organizations.name" : "company",
+    "organizations.title" : "jobTitle",
+    "birthday" : "birthday",
+    "note" : "note",
+    "categories" : "categories",
+    "urls" : "webpage",
+    "urls.value" : "webpage"
+};
+
+/*
+ * Build an array of all of the valid W3C Contact fields. This is used to
+ * substitute all the fields when ["*"] is specified.
+ */
+var allFields = [];
+for ( var key in fieldMappings) {
+    if (fieldMappings.hasOwnProperty(key)) {
+        allFields.push(key);
+    }
+}
+
+/**
+ * Create a W3C ContactAddress object from a BlackBerry Address object.
+ *
+ * @param {String}
+ *            type the type of address (e.g. work, home)
+ * @param {blackberry.pim.Address}
+ *            bbAddress a BlakcBerry Address object
+ * @return {ContactAddress} a contact address object or null if the specified
+ *         address is null
+ */
+var createContactAddress = function(type, bbAddress) {
+
+    if (!bbAddress) {
+        return null;
+    }
+
+    var address1 = bbAddress.address1 || "";
+    var address2 = bbAddress.address2 || "";
+    var streetAddress = address1 + ", " + address2;
+    var locality = bbAddress.city || "";
+    var region = bbAddress.stateProvince || "";
+    var postalCode = bbAddress.zipPostal || "";
+    var country = bbAddress.country || "";
+    var formatted = streetAddress + ", " + locality + ", " + region + ", " + postalCode + ", " + country;
+
+    return new ContactAddress(null, type, formatted, streetAddress, locality,
+            region, postalCode, country);
+};
+
+module.exports = {
+    /**
+     * Builds a BlackBerry filter expression for contact search using the
+     * contact fields and search filter provided.
+     *
+     * @param {String[]}
+     *            fields Array of Contact fields to search
+     * @param {String}
+     *            filter Filter, or search string
+     * @return filter expression or null if fields is empty or filter is null or
+     *         empty
+     */
+    buildFilterExpression : function(fields, filter) {
+
+        // ensure filter exists
+        if (!filter || filter === "") {
+            return null;
+        }
+
+        if (fields.length == 1 && fields[0] === "*") {
+            // Cordova enhancement to allow fields value of ["*"] to indicate
+            // all supported fields.
+            fields = allFields;
+        }
+
+        // BlackBerry API uses specific operators to build filter expressions
+        // for
+        // querying Contact lists. The operators are
+        // ["!=","==","<",">","<=",">="].
+        // Use of regex is also an option, and the only one we can use to
+        // simulate
+        // an SQL '%LIKE%' clause.
+        //
+        // Note: The BlackBerry regex implementation doesn't seem to support
+        // conventional regex switches that would enable a case insensitive
+        // search.
+        // It does not honor the (?i) switch (which causes Contact.find() to
+        // fail).
+        // We need case INsensitivity to match the W3C Contacts API spec.
+        // So the guys at RIM proposed this method:
+        //
+        // original filter = "norm"
+        // case insensitive filter = "[nN][oO][rR][mM]"
+        //
+        var ciFilter = "";
+        for ( var i = 0; i < filter.length; i++) {
+            ciFilter = ciFilter + "[" + filter[i].toLowerCase() + filter[i].toUpperCase() + "]";
+        }
+
+        // match anything that contains our filter string
+        filter = ".*" + ciFilter + ".*";
+
+        // build a filter expression using all Contact fields provided
+        var filterExpression = null;
+        if (fields && utils.isArray(fields)) {
+            var fe = null;
+            for (var f = 0; f < fields.length; f++) {
+                if (!fields[f]) {
+                    continue;
+                }
+
+                // retrieve the BlackBerry contact fields that map to the one
+                // specified
+                var bbFields = fieldMappings[fields[f]];
+
+                // BlackBerry doesn't support the field specified
+                if (!bbFields) {
+                    continue;
+                }
+
+                if (!utils.isArray(bbFields)) {
+                    bbFields = [bbFields];
+                }
+
+                // construct the filter expression using the BlackBerry fields
+                for (var j = 0; j < bbFields.length; j++) {
+                    fe = new blackberry.find.FilterExpression(bbFields[j],
+                            "REGEX", filter);
+                    if (filterExpression === null) {
+                        filterExpression = fe;
+                    } else {
+                        // combine the filters
+                        filterExpression = new blackberry.find.FilterExpression(
+                                filterExpression, "OR", fe);
+                    }
+                }
+            }
+        }
+
+        return filterExpression;
+    },
+
+    /**
+     * Creates a Contact object from a BlackBerry Contact object, copying only
+     * the fields specified.
+     *
+     * This is intended as a privately used function but it is made globally
+     * available so that a Contact.save can convert a BlackBerry contact object
+     * into its W3C equivalent.
+     *
+     * @param {blackberry.pim.Contact}
+     *            bbContact BlackBerry Contact object
+     * @param {String[]}
+     *            fields array of contact fields that should be copied
+     * @return {Contact} a contact object containing the specified fields or
+     *         null if the specified contact is null
+     */
+    createContact : function(bbContact, fields) {
+
+        if (!bbContact) {
+            return null;
+        }
+
+        // construct a new contact object
+        // always copy the contact id and displayName fields
+        var contact = new Contact(bbContact.uid, bbContact.user1);
+
+        // nothing to do
+        if (!fields || !(utils.isArray(fields)) || fields.length === 0) {
+            return contact;
+        } else if (fields.length == 1 && fields[0] === "*") {
+            // Cordova enhancement to allow fields value of ["*"] to indicate
+            // all supported fields.
+            fields = allFields;
+        }
+
+        // add the fields specified
+        for (var i = 0; i < fields.length; i++) {
+            var field = fields[i];
+
+            if (!field) {
+                continue;
+            }
+
+            // name
+            if (field.indexOf('name') === 0) {
+                var formattedName = bbContact.title + ' ' + bbContact.firstName + ' ' + bbContact.lastName;
+                contact.name = new ContactName(formattedName,
+                        bbContact.lastName, bbContact.firstName, null,
+                        bbContact.title, null);
+            }
+            // phone numbers
+            else if (field.indexOf('phoneNumbers') === 0) {
+                var phoneNumbers = [];
+                if (bbContact.homePhone) {
+                    phoneNumbers.push(new ContactField('home',
+                            bbContact.homePhone));
+                }
+                if (bbContact.homePhone2) {
+                    phoneNumbers.push(new ContactField('home',
+                            bbContact.homePhone2));
+                }
+                if (bbContact.workPhone) {
+                    phoneNumbers.push(new ContactField('work',
+                            bbContact.workPhone));
+                }
+                if (bbContact.workPhone2) {
+                    phoneNumbers.push(new ContactField('work',
+                            bbContact.workPhone2));
+                }
+                if (bbContact.mobilePhone) {
+                    phoneNumbers.push(new ContactField('mobile',
+                            bbContact.mobilePhone));
+                }
+                if (bbContact.faxPhone) {
+                    phoneNumbers.push(new ContactField('fax',
+                            bbContact.faxPhone));
+                }
+                if (bbContact.pagerPhone) {
+                    phoneNumbers.push(new ContactField('pager',
+                            bbContact.pagerPhone));
+                }
+                if (bbContact.otherPhone) {
+                    phoneNumbers.push(new ContactField('other',
+                            bbContact.otherPhone));
+                }
+                contact.phoneNumbers = phoneNumbers.length > 0 ? phoneNumbers
+                        : null;
+            }
+            // emails
+            else if (field.indexOf('emails') === 0) {
+                var emails = [];
+                if (bbContact.email1) {
+                    emails.push(new ContactField(null, bbContact.email1, null));
+                }
+                if (bbContact.email2) {
+                    emails.push(new ContactField(null, bbContact.email2, null));
+                }
+                if (bbContact.email3) {
+                    emails.push(new ContactField(null, bbContact.email3, null));
+                }
+                contact.emails = emails.length > 0 ? emails : null;
+            }
+            // addresses
+            else if (field.indexOf('addresses') === 0) {
+                var addresses = [];
+                if (bbContact.homeAddress) {
+                    addresses.push(createContactAddress("home",
+                            bbContact.homeAddress));
+                }
+                if (bbContact.workAddress) {
+                    addresses.push(createContactAddress("work",
+                            bbContact.workAddress));
+                }
+                contact.addresses = addresses.length > 0 ? addresses : null;
+            }
+            // birthday
+            else if (field.indexOf('birthday') === 0) {
+                if (bbContact.birthday) {
+                    contact.birthday = bbContact.birthday;
+                }
+            }
+            // note
+            else if (field.indexOf('note') === 0) {
+                if (bbContact.note) {
+                    contact.note = bbContact.note;
+                }
+            }
+            // organizations
+            else if (field.indexOf('organizations') === 0) {
+                var organizations = [];
+                if (bbContact.company || bbContact.jobTitle) {
+                    organizations.push(new ContactOrganization(null, null,
+                            bbContact.company, null, bbContact.jobTitle));
+                }
+                contact.organizations = organizations.length > 0 ? organizations
+                        : null;
+            }
+            // categories
+            else if (field.indexOf('categories') === 0) {
+                if (bbContact.categories && bbContact.categories.length > 0) {
+                    contact.categories = bbContact.categories;
+                } else {
+                    contact.categories = null;
+                }
+            }
+            // urls
+            else if (field.indexOf('urls') === 0) {
+                var urls = [];
+                if (bbContact.webpage) {
+                    urls.push(new ContactField(null, bbContact.webpage));
+                }
+                contact.urls = urls.length > 0 ? urls : null;
+            }
+            // photos
+            else if (field.indexOf('photos') === 0) {
+                var photos = [];
+                // The BlackBerry Contact object will have a picture attribute
+                // with Base64 encoded image
+                if (bbContact.picture) {
+                    photos.push(new ContactField('base64', bbContact.picture));
+                }
+                contact.photos = photos.length > 0 ? photos : null;
+            }
+        }
+
+        return contact;
+    }
+};
+
+});
+
+// file: lib/webworks/java/plugin/java/DirectoryEntry.js
+define("cordova/plugin/java/DirectoryEntry", function(require, exports, module) {
+var DirectoryEntry = require('cordova/plugin/DirectoryEntry'),
+    FileEntry = require('cordova/plugin/FileEntry'),
+    FileError = require('cordova/plugin/FileError'),
+    exec = require('cordova/exec');
+
+module.exports = {
+    /**
+     * Creates or looks up a directory; override for BlackBerry.
+     *
+     * @param path
+     *            {DOMString} either a relative or absolute path from this
+     *            directory in which to look up or create a directory
+     * @param options
+     *            {Flags} options to create or exclusively create the directory
+     * @param successCallback
+     *            {Function} called with the new DirectoryEntry
+     * @param errorCallback
+     *            {Function} called with a FileError
+     */
+    getDirectory : function(path, options, successCallback, errorCallback) {
+        // create directory if it doesn't exist
+        var create = (options && options.create === true) ? true : false,
+        // if true, causes failure if create is true and path already exists
+        exclusive = (options && options.exclusive === true) ? true : false,
+        // directory exists
+        exists,
+        // create a new DirectoryEntry object and invoke success callback
+        createEntry = function() {
+            var path_parts = path.split('/'),
+                name = path_parts[path_parts.length - 1],
+                dirEntry = new DirectoryEntry(name, path);
+
+            // invoke success callback
+            if (typeof successCallback === 'function') {
+                successCallback(dirEntry);
+            }
+        };
+
+        var fail = function(error) {
+            if (typeof errorCallback === 'function') {
+                errorCallback(new FileError(error));
+            }
+        };
+
+        // determine if path is relative or absolute
+        if (!path) {
+            fail(FileError.ENCODING_ERR);
+            return;
+        } else if (path.indexOf(this.fullPath) !== 0) {
+            // path does not begin with the fullPath of this directory
+            // therefore, it is relative
+            path = this.fullPath + '/' + path;
+        }
+
+        // determine if directory exists
+        try {
+            // will return true if path exists AND is a directory
+            exists = blackberry.io.dir.exists(path);
+        } catch (e) {
+            // invalid path
+            fail(FileError.ENCODING_ERR);
+            return;
+        }
+
+        // path is a directory
+        if (exists) {
+            if (create && exclusive) {
+                // can't guarantee exclusivity
+                fail(FileError.PATH_EXISTS_ERR);
+            } else {
+                // create entry for existing directory
+                createEntry();
+            }
+        }
+        // will return true if path exists AND is a file
+        else if (blackberry.io.file.exists(path)) {
+            // the path is a file
+            fail(FileError.TYPE_MISMATCH_ERR);
+        }
+        // path does not exist, create it
+        else if (create) {
+            try {
+                // directory path must have trailing slash
+                var dirPath = path;
+                if (dirPath.substr(-1) !== '/') {
+                    dirPath += '/';
+                }
+                blackberry.io.dir.createNewDir(dirPath);
+                createEntry();
+            } catch (eone) {
+                // unable to create directory
+                fail(FileError.NOT_FOUND_ERR);
+            }
+        }
+        // path does not exist, don't create
+        else {
+            // directory doesn't exist
+            fail(FileError.NOT_FOUND_ERR);
+        }
+    },
+    /**
+     * Create or look up a file.
+     *
+     * @param path {DOMString}
+     *            either a relative or absolute path from this directory in
+     *            which to look up or create a file
+     * @param options {Flags}
+     *            options to create or exclusively create the file
+     * @param successCallback {Function}
+     *            called with the new FileEntry object
+     * @param errorCallback {Function}
+     *            called with a FileError object if error occurs
+     */
+    getFile:function(path, options, successCallback, errorCallback) {
+        // create file if it doesn't exist
+        var create = (options && options.create === true) ? true : false,
+            // if true, causes failure if create is true and path already exists
+            exclusive = (options && options.exclusive === true) ? true : false,
+            // file exists
+            exists,
+            // create a new FileEntry object and invoke success callback
+            createEntry = function() {
+                var path_parts = path.split('/'),
+                    name = path_parts[path_parts.length - 1],
+                    fileEntry = new FileEntry(name, path);
+
+                // invoke success callback
+                if (typeof successCallback === 'function') {
+                    successCallback(fileEntry);
+                }
+            };
+
+        var fail = function(error) {
+            if (typeof errorCallback === 'function') {
+                errorCallback(new FileError(error));
+            }
+        };
+
+        // determine if path is relative or absolute
+        if (!path) {
+            fail(FileError.ENCODING_ERR);
+            return;
+        }
+        else if (path.indexOf(this.fullPath) !== 0) {
+            // path does not begin with the fullPath of this directory
+            // therefore, it is relative
+            path = this.fullPath + '/' + path;
+        }
+
+        // determine if file exists
+        try {
+            // will return true if path exists AND is a file
+            exists = blackberry.io.file.exists(path);
+        }
+        catch (e) {
+            // invalid path
+            fail(FileError.ENCODING_ERR);
+            return;
+        }
+
+        // path is a file
+        if (exists) {
+            if (create && exclusive) {
+                // can't guarantee exclusivity
+                fail(FileError.PATH_EXISTS_ERR);
+            }
+            else {
+                // create entry for existing file
+                createEntry();
+            }
+        }
+        // will return true if path exists AND is a directory
+        else if (blackberry.io.dir.exists(path)) {
+            // the path is a directory
+            fail(FileError.TYPE_MISMATCH_ERR);
+        }
+        // path does not exist, create it
+        else if (create) {
+            // create empty file
+            exec(
+                function(result) {
+                    // file created
+                    createEntry();
+                },
+                fail, "File", "write", [ path, "", 0 ]);
+        }
+        // path does not exist, don't create
+        else {
+            // file doesn't exist
+            fail(FileError.NOT_FOUND_ERR);
+        }
+    },
+
+    /**
+     * Delete a directory and all of it's contents.
+     *
+     * @param successCallback {Function} called with no parameters
+     * @param errorCallback {Function} called with a FileError
+     */
+    removeRecursively : function(successCallback, errorCallback) {
+        // we're removing THIS directory
+        var path = this.fullPath;
+
+        var fail = function(error) {
+            if (typeof errorCallback === 'function') {
+                errorCallback(new FileError(error));
+            }
+        };
+
+        // attempt to delete directory
+        if (blackberry.io.dir.exists(path)) {
+            // it is an error to attempt to remove the file system root
+            if (exec(null, null, "File", "isFileSystemRoot", [ path ]) === true) {
+                fail(FileError.NO_MODIFICATION_ALLOWED_ERR);
+            }
+            else {
+                try {
+                    // delete the directory, setting recursive flag to true
+                    blackberry.io.dir.deleteDirectory(path, true);
+                    if (typeof successCallback === "function") {
+                        successCallback();
+                    }
+                } catch (e) {
+                    // permissions don't allow deletion
+                    console.log(e);
+                    fail(FileError.NO_MODIFICATION_ALLOWED_ERR);
+                }
+            }
+        }
+        // it's a file, not a directory
+        else if (blackberry.io.file.exists(path)) {
+            fail(FileError.TYPE_MISMATCH_ERR);
+        }
+        // not found
+        else {
+            fail(FileError.NOT_FOUND_ERR);
+        }
+    }
+};
+});
+
+// file: lib/webworks/java/plugin/java/Entry.js
+define("cordova/plugin/java/Entry", function(require, exports, module) {
+var FileError = require('cordova/plugin/FileError'),
+    LocalFileSystem = require('cordova/plugin/LocalFileSystem'),
+    resolveLocalFileSystemURI = require('cordova/plugin/resolveLocalFileSystemURI'),
+    requestFileSystem = require('cordova/plugin/requestFileSystem'),
+    exec = require('cordova/exec');
+
+module.exports = {
+    remove : function(successCallback, errorCallback) {
+        var path = this.fullPath,
+            // directory contents
+            contents = [];
+
+        var fail = function(error) {
+            if (typeof errorCallback === 'function') {
+                errorCallback(new FileError(error));
+            }
+        };
+
+        // file
+        if (blackberry.io.file.exists(path)) {
+            try {
+                blackberry.io.file.deleteFile(path);
+                if (typeof successCallback === "function") {
+                    successCallback();
+                }
+            } catch (e) {
+                // permissions don't allow
+                fail(FileError.INVALID_MODIFICATION_ERR);
+            }
+        }
+        // directory
+        else if (blackberry.io.dir.exists(path)) {
+            // it is an error to attempt to remove the file system root
+            if (exec(null, null, "File", "isFileSystemRoot", [ path ]) === true) {
+                fail(FileError.NO_MODIFICATION_ALLOWED_ERR);
+            } else {
+                // check to see if directory is empty
+                contents = blackberry.io.dir.listFiles(path);
+                if (contents.length !== 0) {
+                    fail(FileError.INVALID_MODIFICATION_ERR);
+                } else {
+                    try {
+                        // delete
+                        blackberry.io.dir.deleteDirectory(path, false);
+                        if (typeof successCallback === "function") {
+                            successCallback();
+                        }
+                    } catch (eone) {
+                        // permissions don't allow
+                        fail(FileError.NO_MODIFICATION_ALLOWED_ERR);
+                    }
+                }
+            }
+        }
+        // not found
+        else {
+            fail(FileError.NOT_FOUND_ERR);
+        }
+    },
+    getParent : function(successCallback, errorCallback) {
+        var that = this;
+
+        try {
+            // On BlackBerry, the TEMPORARY file system is actually a temporary
+            // directory that is created on a per-application basis. This is
+            // to help ensure that applications do not share the same temporary
+            // space. So we check to see if this is the TEMPORARY file system
+            // (directory). If it is, we must return this Entry, rather than
+            // the Entry for its parent.
+            requestFileSystem(LocalFileSystem.TEMPORARY, 0,
+                    function(fileSystem) {
+                        if (fileSystem.root.fullPath === that.fullPath) {
+                            if (typeof successCallback === 'function') {
+                                successCallback(fileSystem.root);
+                            }
+                        } else {
+                            resolveLocalFileSystemURI(blackberry.io.dir
+                                    .getParentDirectory(that.fullPath),
+                                    successCallback, errorCallback);
+                        }
+                    }, errorCallback);
+        } catch (e) {
+            if (typeof errorCallback === 'function') {
+                errorCallback(new FileError(FileError.NOT_FOUND_ERR));
+            }
+        }
+    }
+};
+
+});
+
+// file: lib/webworks/java/plugin/java/MediaError.js
+define("cordova/plugin/java/MediaError", function(require, exports, module) {
+
+// The MediaError object exists on BB OS 6+ which prevents the Cordova version
+// from being defined. This object is used to merge in differences between the BB
+// MediaError object and the Cordova version.
+module.exports = {
+        MEDIA_ERR_NONE_ACTIVE : 0,
+        MEDIA_ERR_NONE_SUPPORTED : 4
+};
+});
+
+// file: lib/webworks/java/plugin/java/app.js
+define("cordova/plugin/java/app", function(require, exports, module) {
+var exec = require('cordova/exec');
+var manager = require('cordova/plugin/manager');
+
+module.exports = {
+  /**
+   * Clear the resource cache.
+   */
+  clearCache:function() {
+      if (typeof blackberry.widgetcache === "undefined" || blackberry.widgetcache === null) {
+          console.log("blackberry.widgetcache permission not found. Cache clear request denied.");
+          return;
+      }
+      blackberry.widgetcache.clearAll();
+  },
+
+  /**
+   * Clear web history in this web view.
+   * Instead of BACK button loading the previous web page, it will exit the app.
+   */
+  clearHistory:function() {
+    exec(null, null, "App", "clearHistory", []);
+  },
+
+  /**
+   * Go to previous page displayed.
+   * This is the same as pressing the backbutton on Android device.
+   */
+  backHistory:function() {
+    // window.history.back() behaves oddly on BlackBerry, so use
+    // native implementation.
+    exec(null, null, "App", "backHistory", []);
+  },
+
+  /**
+   * Exit and terminate the application.
+   */
+  exitApp:function() {
+      // Call onunload if it is defined since BlackBerry does not invoke
+      // on application exit.
+      if (typeof window.onunload === "function") {
+          window.onunload();
+      }
+
+      // allow Cordova JavaScript Extension opportunity to cleanup
+      manager.destroy();
+
+      // exit the app
+      blackberry.app.exit();
+  }
+};
+
+});
+
+// file: lib/webworks/java/plugin/java/contacts.js
+define("cordova/plugin/java/contacts", function(require, exports, module) {
+var ContactError = require('cordova/plugin/ContactError'),
+    utils = require('cordova/utils'),
+    ContactUtils = require('cordova/plugin/java/ContactUtils');
+
+module.exports = {
+    /**
+     * Returns an array of Contacts matching the search criteria.
+     *
+     * @return array of Contacts matching search criteria
+     */
+    find : function(fields, success, fail, options) {
+        // Success callback is required. Throw exception if not specified.
+        if (typeof success !== 'function') {
+            throw new TypeError(
+                    "You must specify a success callback for the find command.");
+        }
+
+        // Search qualifier is required and cannot be empty.
+        if (!fields || !(utils.isArray(fields)) || fields.length === 0) {
+            if (typeof fail == 'function') {
+                fail(new ContactError(ContactError.INVALID_ARGUMENT_ERROR));
+            }
+            return;
+        }
+
+        // default is to return a single contact match
+        var numContacts = 1;
+
+        // search options
+        var filter = null;
+        if (options) {
+            // return multiple objects?
+            if (options.multiple === true) {
+                // -1 on BlackBerry will return all contact matches.
+                numContacts = -1;
+            }
+            filter = options.filter;
+        }
+
+        // build the filter expression to use in find operation
+        var filterExpression = ContactUtils.buildFilterExpression(fields, filter);
+
+        // find matching contacts
+        // Note: the filter expression can be null here, in which case, the find
+        // won't filter
+        var bbContacts = blackberry.pim.Contact.find(filterExpression, null, numContacts);
+
+        // convert to Contact from blackberry.pim.Contact
+        var contacts = [];
+        for (var i = 0; i < bbContacts.length; i++) {
+            if (bbContacts[i]) {
+                // W3C Contacts API specification states that only the fields
+                // in the search filter should be returned, so we create
+                // a new Contact object, copying only the fields specified
+                contacts.push(ContactUtils.createContact(bbContacts[i], fields));
+            }
+        }
+
+        // return results
+        success(contacts);
+    }
+
+};
+
+});
+
+// file: lib/webworks/java/plugin/java/notification.js
+define("cordova/plugin/java/notification", function(require, exports, module) {
+var exec = require('cordova/exec');
+
+/**
+ * Provides BlackBerry enhanced notification API.
+ */
+module.exports = {
+    activityStart : function(title, message) {
+        // If title and message not specified then mimic Android behavior of
+        // using default strings.
+        if (typeof title === "undefined" && typeof message == "undefined") {
+            title = "Busy";
+            message = 'Please wait...';
+        }
+
+        exec(null, null, 'Notification', 'activityStart', [ title, message ]);
+    },
+
+    /**
+     * Close an activity dialog
+     */
+    activityStop : function() {
+        exec(null, null, 'Notification', 'activityStop', []);
+    },
+
+    /**
+     * Display a progress dialog with progress bar that goes from 0 to 100.
+     *
+     * @param {String}
+     *            title Title of the progress dialog.
+     * @param {String}
+     *            message Message to display in the dialog.
+     */
+    progressStart : function(title, message) {
+        exec(null, null, 'Notification', 'progressStart', [ title, message ]);
+    },
+
+    /**
+     * Close the progress dialog.
+     */
+    progressStop : function() {
+        exec(null, null, 'Notification', 'progressStop', []);
+    },
+
+    /**
+     * Set the progress dialog value.
+     *
+     * @param {Number}
+     *            value 0-100
+     */
+    progressValue : function(value) {
+        exec(null, null, 'Notification', 'progressValue', [ value ]);
+    }
+};
 });
 
 // file: lib/common/plugin/logger.js
@@ -4188,7 +5729,7 @@ CurrentLevel = LevelsMap.WARN;
  *
  * The value used determines which messages get printed.  The logging
  * values above are in order, and only messages logged at the logging
- * level or above will actually be displayed to the user.  Eg, the
+ * level or above will actually be displayed to the user.  E.g., the
  * default level is WARN, so only messages logged with LOG, ERROR, or
  * WARN will be displayed; INFO and DEBUG messages will be ignored.
  */
@@ -4341,6 +5882,81 @@ document.addEventListener("deviceready", logger.__onDeviceReady, false);
 
 });
 
+// file: lib/webworks/java/plugin/manager.js
+define("cordova/plugin/manager", function(require, exports, module) {
+var cordova = require('cordova');
+
+function _exec(win, fail, clazz, action, args) {
+    var callbackId = clazz + cordova.callbackId++,
+        origResult,
+        evalResult,
+        execResult;
+
+    try {
+        if (win || fail) {
+            cordova.callbacks[callbackId] = {success: win, fail: fail};
+        }
+
+        // Note: Device returns string, but for some reason emulator returns object - so convert to string.
+        origResult = "" + org.apache.cordova.JavaPluginManager.exec(clazz, action, callbackId, JSON.stringify(args), true);
+
+        // If a result was returned
+        if (origResult.length > 0) {
+            evalResult = JSON.parse(origResult);
+
+            // If status is OK, then return evalResultalue back to caller
+            if (evalResult.status === cordova.callbackStatus.OK) {
+
+                // If there is a success callback, then call it now with returned evalResultalue
+                if (win) {
+                    // Clear callback if not expecting any more results
+                    if (!evalResult.keepCallback) {
+                        delete cordova.callbacks[callbackId];
+                    }
+                }
+            } else if (evalResult.status === cordova.callbackStatus.NO_RESULT) {
+
+                // Clear callback if not expecting any more results
+                if (!evalResult.keepCallback) {
+                    delete cordova.callbacks[callbackId];
+                }
+            } else {
+                // If there is a fail callback, then call it now with returned evalResultalue
+                if (fail) {
+
+                    // Clear callback if not expecting any more results
+                    if (!evalResult.keepCallback) {
+                        delete cordova.callbacks[callbackId];
+                    }
+                }
+            }
+            execResult = evalResult;
+        } else {
+            // Asynchronous calls return an empty string. Return a NO_RESULT
+            // status for those executions.
+            execResult = {"status" : cordova.callbackStatus.NO_RESULT,
+                    "message" : ""};
+        }
+    } catch (e) {
+        console.log("BlackBerryPluginManager Error: " + e);
+        execResult = {"status" : cordova.callbackStatus.ERROR,
+                      "message" : e.message};
+    }
+
+    return execResult;
+}
+
+module.exports = {
+    exec: function (win, fail, clazz, action, args) {
+        return _exec(win, fail, clazz, action, args);
+    },
+    resume: org.apache.cordova.JavaPluginManager.resume,
+    pause: org.apache.cordova.JavaPluginManager.pause,
+    destroy: org.apache.cordova.JavaPluginManager.destroy
+};
+
+});
+
 // file: lib/common/plugin/network.js
 define("cordova/plugin/network", function(require, exports, module) {
 var exec = require('cordova/exec'),
@@ -4465,362 +6081,6 @@ module.exports = {
 };
 });
 
-// file: lib/playbook/plugin/playbook/device.js
-define("cordova/plugin/playbook/device", function(require, exports, module) {
-var me = {},
-    exec = require('cordova/exec'),
-    channel = require('cordova/channel');
-
-channel.onCordovaReady.subscribeOnce(function() {
-    exec(function (device) {
-        me.platform = device.platform;
-        me.version  = device.version;
-        me.name     = device.name;
-        me.uuid     = device.uuid;
-        me.cordova  = device.cordova;
-
-        channel.onCordovaInfoReady.fire();
-    },
-    function (e) {
-        console.log("error initializing cordova: " + e);
-    },
-    "Device",
-    "getDeviceInfo",
-    []
-    );
-});
-
-module.exports = me;
-});
-
-// file: lib/playbook/plugin/playbook/manager.js
-define("cordova/plugin/playbook/manager", function(require, exports, module) {
-var webworks = require('cordova/plugin/webworks/manager'),
-    cordova = require('cordova'),
-    MediaFile = require('cordova/plugin/MediaFile'),
-    /**
-     * Private list of HTML 5 audio objects, indexed by the Cordova media object ids
-     */
-    audioObjects = {},
-    retInvalidAction = function () {
-        return { "status" : cordova.callbackStatus.INVALID_ACTION, "message" : "Action not found" };
-    },
-    retAsyncCall = function () {
-        return { "status" : cordova.callbackStatus.NO_RESULT, "message" : "WebWorks Is On It" };
-    },
-    batteryAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            if (action === 'start') {
-                // Register one listener to each of level and state change
-                // events using WebWorks API.
-                blackberry.system.event.deviceBatteryStateChange(function(state) {
-                    var me = navigator.battery;
-                    // state is either CHARGING or UNPLUGGED
-                    if (state === 2 || state === 3) {
-                        var info = {
-                            "level" : me._level,
-                            "isPlugged" : state === 2
-                        };
-
-                        if (me._isPlugged !== info.isPlugged && typeof win === 'function') {
-                            win(info);
-                        }
-                    }
-                });
-                blackberry.system.event.deviceBatteryLevelChange(function(level) {
-                    var me = navigator.battery;
-                    if (level != me._level && typeof win === 'function') {
-                        win({'level' : level, 'isPlugged' : me._isPlugged});
-                    }
-                });
-            } else if (action === 'stop') {
-                // Unregister battery listeners.
-                blackberry.system.event.deviceBatteryStateChange(null);
-                blackberry.system.event.deviceBatteryLevelChange(null);
-            } else {
-                return retInvalidAction();
-            }
-        }
-    },
-    cameraAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            if (action === 'takePicture') {
-                blackberry.media.camera.takePicture(win, fail, fail);
-                return retAsyncCall();
-            }
-            else {
-                return retInvalidAction();
-            }
-        }
-    },
-    deviceAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            if (action === 'getDeviceInfo') {
-                return {"status" : cordova.callbackStatus.OK,
-                        "message" : {
-                            "version" : blackberry.system.softwareVersion,
-                            "name" : blackberry.system.model,
-                            "uuid" : blackberry.identity.PIN,
-                            "platform" : "PlayBook",
-                            "cordova" : "1.7.0rc1"
-                        }
-                };
-            }
-            return retInvalidAction();
-        }
-    },
-    loggerAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            if (action === 'log') {
-                console.log(args);
-                return {"status" : cordova.callbackStatus.OK,
-                        "message" : 'Message logged to console: ' + args};
-            }
-            else {
-                return retInvalidAction();
-            }
-        }
-    },
-    mediaAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            if (!args.length) {
-                return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
-            }
-
-            var id = args[0],
-                audio = audioObjects[id],
-                result;
-
-            switch (action) {
-            case 'startPlayingAudio':
-                if (args.length === 1) {
-                    result = {"status" : 9, "message" : "Media source argument not found"};
-
-                }
-
-                if (audio) {
-                    audio.pause();
-                    audioObjects[id] = undefined;
-                }
-
-                audio = audioObjects[id] = new Audio(args[1]);
-                audio.play();
-
-                result = {"status" : 1, "message" : "Audio play started" };
-                break;
-            case 'stopPlayingAudio':
-                if (!audio) {
-                    return {"status" : 2, "message" : "Audio Object has not been initialized"};
-                }
-
-                audio.pause();
-                audioObjects[id] = undefined;
-
-                result = {"status" : 1, "message" : "Audio play stopped" };
-                break;
-            case 'seekToAudio':
-                if (!audio) {
-                    result = {"status" : 2, "message" : "Audio Object has not been initialized"};
-                } else if (args.length === 1) {
-                    result = {"status" : 9, "message" : "Media seek time argument not found"};
-                } else {
-                    try {
-                        audio.currentTime = args[1];
-                    } catch (e) {
-                        console.log('Error seeking audio: ' + e);
-                        return {"status" : 3, "message" : "Error seeking audio: " + e};
-                    }
-
-                    result = {"status" : 1, "message" : "Seek to audio succeeded" };
-                }
-                break;
-            case 'pausePlayingAudio':
-                if (!audio) {
-                    return {"status" : 2, "message" : "Audio Object has not been initialized"};
-                }
-
-                audio.pause();
-
-                result = {"status" : 1, "message" : "Audio paused" };
-                break;
-            case 'getCurrentPositionAudio':
-                if (!audio) {
-                    return {"status" : 2, "message" : "Audio Object has not been initialized"};
-                }
-
-                result = {"status" : 1, "message" : audio.currentTime };
-                break;
-            case 'getDuration':
-                if (!audio) {
-                    return {"status" : 2, "message" : "Audio Object has not been initialized"};
-                }
-
-                result = {"status" : 1, "message" : audio.duration };
-                break;
-            case 'startRecordingAudio':
-                if (args.length <= 1) {
-                    result = {"status" : 9, "message" : "Media start recording, insufficient arguments"};
-                }
-
-                blackberry.media.microphone.record(args[1], win, fail);
-                result = retAsyncCall();
-                break;
-            case 'stopRecordingAudio':
-                break;
-            case 'release':
-                if (audio) {
-                    audioObjects[id] = undefined;
-                    audio.src = undefined;
-                    //delete audio;
-                }
-
-                result = {"status" : 1, "message" : "Media resources released"};
-                break;
-            default:
-                result = retInvalidAction();
-            }
-
-            return result;
-        }
-    },
-    mediaCaptureAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            var limit = args[0],
-                pictureFiles = [],
-                captureMethod;
-
-            function captureCB(filePath) {
-                var mediaFile;
-
-                if (filePath) {
-                    mediaFile = new MediaFile();
-                    mediaFile.fullPath = filePath;
-                    pictureFiles.push(mediaFile);
-                }
-
-                if (limit > 0) {
-                    limit--;
-                    blackberry.media.camera[captureMethod](win, fail, fail);
-                    return;
-                }
-
-                win(pictureFiles);
-
-                return retAsyncCall();
-            }
-
-            switch (action) {
-                case 'getSupportedAudioModes':
-                case 'getSupportedImageModes':
-                case 'getSupportedVideoModes':
-                    return {"status": cordova.callbackStatus.OK, "message": []};
-                case 'captureImage':
-                    captureMethod = "takePicture";
-                    captureCB();
-                    break;
-                case 'captureVideo':
-                    captureMethod = "takeVideo";
-                    captureCB();
-                    break;
-                case 'captureAudio':
-                    return {"status": cordova.callbackStatus.INVALID_ACTION, "message": "captureAudio is not currently supported"};
-            }
-
-            return retAsyncCall();
-        }
-    },
-    networkAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            if (action !== 'getConnectionInfo') {
-                return retInvalidAction();
-            }
-
-            var connectionType = require("cordova/plugin/Connection").NONE,
-                eventType = "offline",
-                callbackID,
-                request;
-
-            /**
-             * For PlayBooks, we currently only have WiFi connections, so
-             * return WiFi if there is any access at all.
-             * TODO: update if/when PlayBook gets other connection types...
-             */
-            if (blackberry.system.hasDataCoverage()) {
-                connectionType = require("cordova/plugin/Connection").WIFI;
-                eventType = "online";
-            }
-
-            //Register an event handler for the networkChange event
-            callbackID = blackberry.events.registerEventHandler("networkChange", function (status) {
-                win(status.type);
-            });
-
-            //pass our callback id down to our network extension
-            request = new blackberry.transport.RemoteFunctionCall("org/apache/cordova/getConnectionInfo");
-            request.addParam("networkStatusChangedID", callbackID);
-            request.makeSyncCall();
-
-            return { "status": cordova.callbackStatus.OK, "message": connectionType};
-        }
-    },
-    notificationAPI = {
-        execute: function (webWorksResult, action, args, win, fail) {
-            if (args.length !== 3) {
-              return {"status" : 9, "message" : "Notification action - " + action + " arguments not found"};
-
-            }
-
-            //Unpack and map the args
-            var msg = args[0],
-                title = args[1],
-                btnLabel = args[2],
-                btnLabels;
-
-            switch (action) {
-            case 'alert':
-                blackberry.ui.dialog.customAskAsync.apply(this, [ msg, [ btnLabel ], win, { "title" : title } ]);
-                return retAsyncCall();
-            case 'confirm':
-                btnLabels = btnLabel.split(",");
-                blackberry.ui.dialog.customAskAsync.apply(this, [msg, btnLabels, win, {"title" : title} ]);
-                return retAsyncCall();
-            }
-            return retInvalidAction();
-
-        }
-    },
-    plugins = {
-        'Battery' : batteryAPI,
-        'Camera' : cameraAPI,
-        'Device' : deviceAPI,
-        'Logger' : loggerAPI,
-        'Media' : mediaAPI,
-        'Capture' : mediaCaptureAPI,
-        'NetworkStatus' : networkAPI,
-        'Notification' : notificationAPI
-    };
-
-module.exports = {
-    exec: function (win, fail, clazz, action, args) {
-        var wwResult = webworks.exec(win, fail, clazz, action, args);
-
-        //We got a sync result or a not found from WW that we can pass on to get a native mixin
-        //For async calls there's nothing to do
-        if ((wwResult.status === cordova.callbackStatus.OK ||
-          wwResult.status === cordova.callbackStatus.CLASS_NOT_FOUND_EXCEPTION) &&
-          plugins[clazz]) {
-            return plugins[clazz].execute(wwResult.message, action, args, win, fail);
-        }
-
-        return wwResult;
-    },
-    resume: function () {},
-    pause: function () {},
-    destroy: function () {}
-};
-
-});
-
 // file: lib/common/plugin/requestFileSystem.js
 define("cordova/plugin/requestFileSystem", function(require, exports, module) {
 var FileError = require('cordova/plugin/FileError'),
@@ -4923,6 +6183,9 @@ define("cordova/plugin/splashscreen", function(require, exports, module) {
 var exec = require('cordova/exec');
 
 var splashscreen = {
+    show:function() {
+        exec(null, null, "SplashScreen", "show", []);
+    },
     hide:function() {
         exec(null, null, "SplashScreen", "hide", []);
     }
@@ -4931,24 +6194,253 @@ var splashscreen = {
 module.exports = splashscreen;
 });
 
-// file: lib/webworks/plugin/webworks/manager.js
-define("cordova/plugin/webworks/manager", function(require, exports, module) {
-// Define JavaScript plugin implementations that are common across
-// WebWorks platforms (phone/tablet).
-var plugins = {},
-    cordova = require('cordova');
+// file: lib/webworks/common/plugin/webworks/accelerometer.js
+define("cordova/plugin/webworks/accelerometer", function(require, exports, module) {
+var cordova = require('cordova'),
+    callback;
 
 module.exports = {
-    exec: function (win, fail, clazz, action, args) {
-        if (plugins[clazz]) {
-            return plugins[clazz].execute(action, args, win, fail);
-        }
-
-        console.log(plugins);
-
-        return {"status" : cordova.callbackStatus.CLASS_NOT_FOUND_EXCEPTION, "message" : "Class " + clazz + " cannot be found"};
+    start: function (args, win, fail) {
+        window.removeEventListener("devicemotion", callback);
+        callback = function (motion) {
+            win({
+                x: motion.accelerationIncludingGravity.x,
+                y: motion.accelerationIncludingGravity.y,
+                z: motion.accelerationIncludingGravity.z,
+                timestamp: motion.timestamp
+            });
+        };
+        window.addEventListener("devicemotion", callback);
+        return { "status" : cordova.callbackStatus.NO_RESULT, "message" : "WebWorks Is On It" };
+    },
+    stop: function (args, win, fail) {
+        window.removeEventListener("devicemotion", callback);
+        return { "status" : cordova.callbackStatus.NO_RESULT, "message" : "WebWorks Is On It" };
     }
 };
+
+});
+
+// file: lib/webworks/common/plugin/webworks/logger.js
+define("cordova/plugin/webworks/logger", function(require, exports, module) {
+var cordova = require('cordova');
+
+module.exports = {
+    log: function (args, win, fail) {
+        console.log(args);
+        return {"status" : cordova.callbackStatus.OK,
+                "message" : 'Message logged to console: ' + args};
+    }
+};
+
+});
+
+// file: lib/webworks/common/plugin/webworks/media.js
+define("cordova/plugin/webworks/media", function(require, exports, module) {
+var cordova = require('cordova'),
+    audioObjects = {};
+
+module.exports = {
+    create: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            src = args[1];
+
+        audioObjects[id] = new Audio(src);
+        return {"status" : 1, "message" : "Audio object created" };
+    },
+    startPlayingAudio: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (args.length === 1) {
+            return {"status" : 9, "message" : "Media source argument not found"};
+        }
+
+        if (audio) {
+            audio.pause();
+            audioObjects[id] = undefined;
+        }
+
+        audio = audioObjects[id] = new Audio(args[1]);
+        audio.play();
+
+        return {"status" : 1, "message" : "Audio play started" };
+    },
+    stopPlayingAudio: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (!audio) {
+            return {"status" : 2, "message" : "Audio Object has not been initialized"};
+        }
+
+        audio.pause();
+        audioObjects[id] = undefined;
+
+        return {"status" : 1, "message" : "Audio play stopped" };
+    },
+    seekToAudio: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (!audio) {
+            result = {"status" : 2, "message" : "Audio Object has not been initialized"};
+        } else if (args.length === 1) {
+            result = {"status" : 9, "message" : "Media seek time argument not found"};
+        } else {
+            try {
+                audio.currentTime = args[1];
+            } catch (e) {
+                console.log('Error seeking audio: ' + e);
+                return {"status" : 3, "message" : "Error seeking audio: " + e};
+            }
+
+            result = {"status" : 1, "message" : "Seek to audio succeeded" };
+        }
+
+        return result;
+    },
+    pausePlayingAudio: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (!audio) {
+            return {"status" : 2, "message" : "Audio Object has not been initialized"};
+        }
+
+        audio.pause();
+
+        return {"status" : 1, "message" : "Audio paused" };
+    },
+    getCurrentPositionAudio: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (!audio) {
+            return {"status" : 2, "message" : "Audio Object has not been initialized"};
+        }
+
+        return {"status" : 1, "message" : audio.currentTime };
+    },
+    getDuration: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (!audio) {
+            return {"status" : 2, "message" : "Audio Object has not been initialized"};
+        }
+
+        return {"status" : 1, "message" : audio.duration };
+    },
+    startRecordingAudio: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (args.length <= 1) {
+            result = {"status" : 9, "message" : "Media start recording, insufficient arguments"};
+        }
+
+        blackberry.media.microphone.record(args[1], win, fail);
+        return { "status" : cordova.callbackStatus.NO_RESULT, "message" : "WebWorks Is On It" };
+    },
+    stopRecordingAudio: function (args, win, fail) {
+    },
+    release: function (args, win, fail) {
+        if (!args.length) {
+            return {"status" : 9, "message" : "Media Object id was not sent in arguments"};
+        }
+
+        var id = args[0],
+            audio = audioObjects[id],
+            result;
+
+        if (audio) {
+            audioObjects[id] = undefined;
+            audio.src = undefined;
+            //delete audio;
+        }
+
+        result = {"status" : 1, "message" : "Media resources released"};
+
+        return result;
+    }
+};
+
+});
+
+// file: lib/webworks/common/plugin/webworks/notification.js
+define("cordova/plugin/webworks/notification", function(require, exports, module) {
+var cordova = require('cordova');
+
+module.exports = {
+    alert: function (args, win, fail) {
+        if (args.length !== 3) {
+            return {"status" : 9, "message" : "Notification action - alert arguments not found"};
+        }
+
+        //Unpack and map the args
+        var msg = args[0],
+            title = args[1],
+            btnLabel = args[2];
+
+        blackberry.ui.dialog.customAskAsync.apply(this, [ msg, [ btnLabel ], win, { "title" : title } ]);
+        return { "status" : cordova.callbackStatus.NO_RESULT, "message" : "WebWorks Is On It" };
+    },
+    confirm: function (args, win, fail) {
+        if (args.length !== 3) {
+            return {"status" : 9, "message" : "Notification action - confirm arguments not found"};
+        }
+
+        //Unpack and map the args
+        var msg = args[0],
+            title = args[1],
+            btnLabel = args[2],
+            btnLabels = btnLabel.split(",");
+
+        blackberry.ui.dialog.customAskAsync.apply(this, [msg, btnLabels, win, {"title" : title} ]);
+        return { "status" : cordova.callbackStatus.NO_RESULT, "message" : "WebWorks Is On It" };
+    }
+};
+
 });
 
 // file: lib/common/utils.js
@@ -5076,9 +6568,10 @@ utils.format = function(formatString /* ,... */) {
 utils.vformat = function(formatString, args) {
     if (formatString === null || formatString === undefined) return "";
     if (arguments.length == 1) return formatString.toString();
+    if (typeof formatString != "string") return formatString.toString();
 
     var pattern = /(.*?)%(.)(.*)/;
-    var rest    = formatString.toString();
+    var rest    = formatString;
     var result  = [];
 
     while (args.length) {
@@ -5121,13 +6614,20 @@ function UUIDcreatePart(length) {
 //------------------------------------------------------------------------------
 function formatted(object, formatChar) {
 
-    switch(formatChar) {
-        case 'j':
-        case 'o': return JSON.stringify(object);
-        case 'c': return '';
+    try {
+        switch(formatChar) {
+            case 'j':
+            case 'o': return JSON.stringify(object);
+            case 'c': return '';
+        }
+    }
+    catch (e) {
+        return "error JSON.stringify()ing argument: " + e;
     }
 
-    if (null === object) return Object.prototype.toString.call(object);
+    if ((object === null) || (object === undefined)) {
+        return Object.prototype.toString.call(object);
+    }
 
     return object.toString();
 }
@@ -5191,7 +6691,5 @@ window.cordova = require('cordova');
 
 }(window));
 
-// file: lib/scripts/bootstrap-playbook.js
-require('cordova/channel').onNativeReady.fire();
 
 })();
